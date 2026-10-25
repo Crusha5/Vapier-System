@@ -14,6 +14,8 @@ const ATTRS := [
 
 var tab := "status"
 var world: Node
+var shop_open := false
+var sel_bag := -1
 var panel: PanelContainer
 var body: VBoxContainer
 var tabs_box: HBoxContainer
@@ -97,7 +99,10 @@ func _tabs() -> void:
 		c.queue_free()
 	var free_attr := int(PlayerStats.s.attr_points)
 	var free_sk := int(PlayerStats.s.skill_points)
-	for t in [["status", "STATUS" + (" •" if free_attr > 0 else "")], ["inventory", "INVENTAR"], ["skills", "SKILLS" + (" •" if free_sk > 0 else "")], ["quests", "QUESTS"]]:
+	var tabs := [["status", "STATUS" + (" •" if free_attr > 0 else "")], ["gear", "AUSRÜSTUNG"], ["inventory", "BLUT"], ["skills", "SKILLS" + (" •" if free_sk > 0 else "")], ["quests", "QUESTS"]]
+	if shop_open:
+		tabs.insert(0, ["shop", "LADEN"])
+	for t in tabs:
 		var id: String = t[0]
 		var cb := func():
 			tab = id
@@ -105,12 +110,7 @@ func _tabs() -> void:
 		var b := H.btn(t[1], cb, "TabOn" if tab == id else "Tab")
 		b.custom_minimum_size = Vector2(0, 34)
 		tabs_box.add_child(b)
-	var parts := []
-	if free_attr > 0:
-		parts.append("%d Attributpunkte" % free_attr)
-	if free_sk > 0:
-		parts.append("%d Skillpunkte" % free_sk)
-	points_lbl.text = "  ·  ".join(parts)
+	points_lbl.text = "◆ %d" % int(PlayerStats.s.shards)
 
 func rebuild() -> void:
 	if not is_inside_tree():
@@ -128,6 +128,10 @@ func rebuild() -> void:
 			_skills()
 		"quests":
 			_quests()
+		"gear":
+			_gear()
+		"shop":
+			_shop()
 
 func _row(left: Control, right: Control) -> HBoxContainer:
 	var h := H.hbox(8)
@@ -317,6 +321,27 @@ func _quests() -> void:
 			h.add_child(H.lbl("%d/%d" % [int(q.progress), int(q.goal)] if not q.done else "✓", 12, H.CYAN, H.F_MONO))
 			body.add_child(qc)
 	body.add_child(H.wrap("Belohnung je Quest: 120 EXP + 1 Attributpunkt. Alle drei: +1 Skillpunkt. Verfehlt: Systemstrafe (Quarantäne, −15 % max. HP).", 11))
+	body.add_child(H.caps("Nebenquests", H.CYAN))
+	var any := false
+	for sid in PlayerStats.SIDE:
+		var stt := PlayerStats.side_state(sid)
+		if stt == "":
+			continue
+		any = true
+		var sq: Dictionary = PlayerStats.SIDE[sid]
+		var sc := H.card("Card" if stt != "done" else "CardDim")
+		var sh := H.hbox(10)
+		sc.add_child(sh)
+		var sv := H.vbox(1)
+		sv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sh.add_child(sv)
+		sv.add_child(H.lbl("%s  ·  %s" % [sq.title, sq.giver], 13, H.FG if stt != "done" else H.MUTED, H.F_SEMI))
+		sv.add_child(H.wrap(sq.text, 11))
+		var prog := int(PlayerStats.s.side[sid].progress)
+		sh.add_child(H.lbl("✓" if stt == "done" else ("Abgeben!" if stt == "ready" else "%d/%d" % [prog, int(sq.goal)]), 12, H.GOLD if stt == "ready" else H.CYAN, H.F_MONO))
+		body.add_child(sc)
+	if not any:
+		body.add_child(H.wrap("Sprich mit Leuten in der Akademie – Mira im Schlafsaal, Brann in der Mensa.", 12))
 	body.add_child(H.caps("Verborgene Quests", H.GOLD))
 	var hidden := [
 		["midnight_vault", "Stunde Null", "Hinter den Trümmern im Westen des Archivs flüstert etwas – aber nur, wenn die Uhr die Stunde Null schlägt."],
@@ -330,3 +355,84 @@ func _quests() -> void:
 		hv.add_child(H.lbl(hq[1] if done else "???", 14, H.GOLD if done else H.MUTED, H.F_BOLD))
 		hv.add_child(H.wrap("Abgeschlossen." if done else hq[2], 11))
 		body.add_child(hc)
+
+# ---------- Ausrüstung ----------
+
+func _item_card(it: Dictionary, buttons: Array, compare := {}) -> PanelContainer:
+	var c := H.card("Card")
+	c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var col := Items.color(it)
+	var sb := H.box(Color(col.r, col.g, col.b, 0.06), Color(col.r, col.g, col.b, 0.45), 1, 2, Vector2(10, 7))
+	c.add_theme_stylebox_override("panel", sb)
+	var h := H.hbox(8)
+	c.add_child(h)
+	var v := H.vbox(0)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(v)
+	var head := H.hbox(6)
+	head.add_child(H.lbl(String(it.name), 14, col, H.F_BOLD))
+	var sub := "%s · %s · Stufe %d" % [Items.SLOTS[it.slot], Items.RARITY[int(it.rarity)].name, int(it.lvl)]
+	if it.slot == "weapon":
+		sub += " · " + String(Items.WEAPONS[it.type].desc)
+	v.add_child(head)
+	v.add_child(H.lbl(sub, 10, H.MUTED, H.F_REG))
+	var ln := "  ·  ".join(Items.lines(it))
+	v.add_child(H.wrap(ln, 11, H.FG))
+	if not compare.is_empty():
+		var diff := Items.power(it) - Items.power(compare)
+		var arrow := "▲ besser" if diff > 0.5 else ("▼ schwächer" if diff < -0.5 else "≈ gleich")
+		v.add_child(H.lbl(arrow, 10, Color(0.5, 1.0, 0.6) if diff > 0.5 else (Color(1.0, 0.5, 0.45) if diff < -0.5 else H.MUTED), H.F_SEMI))
+	var bv := H.vbox(4)
+	bv.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(bv)
+	for b in buttons:
+		var btn := H.btn(b[0], b[1], b[2] if b.size() > 2 else "", b[3] if b.size() > 3 else false)
+		btn.custom_minimum_size = Vector2(92, 34)
+		bv.add_child(btn)
+	return c
+
+func _gear() -> void:
+	body.add_child(H.caps("Angelegt  ·  Blutsplitter: %d" % int(PlayerStats.s.shards), H.CYAN))
+	for slot in ["weapon", "armor", "relic"]:
+		var it: Dictionary = PlayerStats.s.equip.get(slot, {})
+		if it.is_empty():
+			var e := H.card("CardDim")
+			e.add_child(H.lbl("%s: leer" % Items.SLOTS[slot], 13, H.MUTED, H.F_SEMI))
+			body.add_child(e)
+		else:
+			body.add_child(_item_card(it, []))
+	var bag: Array = PlayerStats.s.bag
+	body.add_child(H.caps("Tasche  ·  %d / 30" % bag.size(), H.CYAN))
+	if bag.is_empty():
+		body.add_child(H.wrap("Noch leer. Gegner lassen Ausrüstung fallen – achte auf Lichtsäulen. Bosse droppen garantiert Seltenes.", 12))
+	for i in bag.size():
+		var it: Dictionary = bag[i]
+		var idx := i
+		var eq: Dictionary = PlayerStats.s.equip.get(it.slot, {})
+		var cb_eq := func():
+			PlayerStats.equip_item(idx)
+			if world:
+				world.sfx("quest")
+			rebuild()
+		var cb_sv := func():
+			PlayerStats.salvage(idx)
+			rebuild()
+		body.add_child(_item_card(it, [["Anlegen", cb_eq, "BtnRed"], ["Zerlegen +%d" % Items.value(it), cb_sv]], eq))
+
+func _shop() -> void:
+	body.add_child(H.caps("Quartiermeister Brann  ·  Deine Blutsplitter: %d" % int(PlayerStats.s.shards), H.GOLD))
+	var items := PlayerStats.shop_items()
+	if items.is_empty():
+		body.add_child(H.wrap("Ausverkauft. Komm später wieder – Brann bekommt jeden Tag und nach Story-Fortschritt neue Ware.", 12))
+	for i in items.size():
+		var it: Dictionary = items[i]
+		var idx := i
+		var p := Items.price(it)
+		var eq: Dictionary = PlayerStats.s.equip.get(it.slot, {})
+		var cb := func():
+			if PlayerStats.buy(idx):
+				if world:
+					world.sfx("quest")
+				rebuild()
+		body.add_child(_item_card(it, [["Kaufen ◆%d" % p, cb, "BtnRed", int(PlayerStats.s.shards) < p]], eq))
+	body.add_child(H.wrap("Tipp: Gegenstände aus der Tasche zerlegen bringt Blutsplitter.", 11))

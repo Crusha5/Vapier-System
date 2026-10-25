@@ -4,18 +4,21 @@
 
 Jahr 2185, Vanguard-Akademie: Du bist **Kadett-Subjekt 0** – ohne Gen-Anpassungen, gemobbt, kurz vor dem Rauswurf. In den Ruinen des alten Archivs erweckt dein Blut das verbotene **Sanguine-Protokoll**: ein holografisches RPG-System mit unbegrenztem Potenzial – und einer tödlichen Bedingung: **Deine Lebensenergie zehrt von Blut.**
 
-## Was schon drin ist (Kapitel 1 – Erwachen)
+## Was schon drin ist
 
+**v0.2 – Kapitel 2 „Knochen und Erinnerung“**
+- **Neue Figuren:** durchgehende, geskinnte Körper mit Skelett (keine Kästen mehr) – Anime-Frisuren, Mäntel, Umhänge, Stiefel, leuchtende Akzente. Karkosa aus glatten, gerippten Chitin-Formen mit Sichelarmen.
+- **Kampf-Gefühl:** Klingenspur, Blutspritzer und Blutlachen je Gegnerart (rot, grün, violett), Kamera-Kick, Trefferpause, Kombo-Zähler mit **Blutrausch** ab 15 Treffern.
+- **Ausrüstung & Beute:** Waffen (Blutklinge, Schattensense, Zwillingsdolche – jede spielt sich anders), Uniformen, Relikte. Vier Seltenheiten mit zufälligen Eigenschaften, Lichtsäulen am Boden, Ausrüsten/Zerlegen, Blutsplitter als Währung, Laden beim Quartiermeister.
+- **Größere Welt:** Innenhof der Gründer, Schlafsaal, Mensa, alter Aufzug und Katakomben (Gruft, Ossarium, Brutkammer).
+- **Kapitel 2:** Mira, Brann, der Schlächter (Flächenangriffe), Erinnerungsfragmente des ersten Wirts, Boss **Brutmutter**. Drei Nebenquests.
+
+**Kapitel 1 – Erwachen**
 - **Story:** Intro → Relikt berühren (Erwachen) → Karkosa-Einbruch im Archiv → Rivale Drax in der Trainingshalle → Karkosa-Nest im Ostflügel → Gespräch mit dem Protokoll.
 - **Blut-Hunger-Loop:** Blut-Anzeige leert sich in Echtzeit (END verlangsamt). Bei 0 % Blutmangel: HP-Verlust, weniger Schaden und Tempo.
 - **Blut-Essenzen:** Karkosa-Blut (Rüstung + Stärke), Mutanten-Blut (Schattenkraft, kürzere Abklingzeiten), Menschliches Blut (am meisten Blut + EXP, aber **Verdacht** steigt). Bei 100 % Verdacht jagt dich Ausbilder Varek.
-- **Kampf:** 3er-Kombo mit Zielhilfe (halten = Dauerangriff), Schatten-Dash mit Unverwundbarkeit, **perfekter Dash** (kurz vor dem Treffer) mit Zeitlupe, Blutsichel, Blutlanze, Eklipse.
-- **Gegner:** Karkosa-Späher, Karkosa-Klingen, Mutanten (Säurespucke), Kadetten, Rivale Drax, Ausbilder Varek, Karkosa-Nest. Angriffe werden mit roten Kreisen angekündigt.
-- **Progression:** Level-ups mit frei verteilbaren Punkten auf STR / AGI / END / SHD, Skill-Baum mit 9 Skills.
-- **Quests:** Hauptquest, 3 tägliche System-Quests (Echtzeit, mit Systemstrafe bei Nichterfüllung), 2 verborgene Quests.
-- **Hologramm-UI:** HUD nach GDD (Werte oben links, Quest oben rechts, Joystick unten links, Aktionsknöpfe unten rechts), System-Fenster mit Status, Inventar, Skills und Quests.
-- **Welt:** Archivruinen, Neon-Korridor, Trainingshalle, Wartungsgang, Ostflügel, ein verborgenes Gewölbe. Ingame-Uhr (1 Sekunde = 1 Minute).
-- Spielstand wird automatisch gespeichert (auch beim Wechsel aus der App). Am Relikt kann man ruhen (HP + Speichern).
+- **Kampf:** 3er-Kombo mit Zielhilfe, Schatten-Dash, **perfekter Dash** mit Zeitlupe, Blutsichel, Blutlanze, Eklipse.
+- **Progression:** Level-ups mit STR / AGI / END / SHD, Skill-Baum, tägliche System-Quests, verborgene Quests.
 
 ## APK bekommen
 

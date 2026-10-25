@@ -27,6 +27,11 @@ var wave_spawned := 0
 var drax: Enemy
 var nest: Enemy
 var instructor: Enemy
+var butcher: Enemy
+var brood: Enemy
+var npcs := {}
+var loot: Array = []
+var decals: Array = []
 var ambient: Array = []
 var ambient_t := 0.0
 var hall_greeted := false
@@ -56,6 +61,7 @@ func _ready() -> void:
 	player.world = self
 	add_child(player)
 	player.global_position = Academy.PLAYER_START if not PlayerStats.s.awakened else Academy.RESPAWN
+	_spawn_npcs()
 	camera = Camera3D.new()
 	camera.fov = 46.0
 	camera.near = 0.3
@@ -133,7 +139,7 @@ func _build_title() -> void:
 	v.add_child(t1)
 	var t2 := H.lbl("PROTOCOL", 38, H.RED, H.F_BOLD)
 	v.add_child(t2)
-	v.add_child(H.lbl("Kapitel 1 · Erwachen", 15, H.MUTED, H.F_SEMI))
+	v.add_child(H.lbl("Kapitel 2 · Knochen und Erinnerung" if int(PlayerStats.s.story) >= 5 else "Kapitel 1 · Erwachen", 15, H.MUTED, H.F_SEMI))
 	var sp := Control.new()
 	sp.custom_minimum_size = Vector2(0, 4)
 	v.add_child(sp)
@@ -145,7 +151,7 @@ func _build_title() -> void:
 	var b2 := H.btn("Neues Spiel", func(): _confirm_new(has_save), "" if has_save else "BtnRed")
 	b2.custom_minimum_size = Vector2(260, 44)
 	v.add_child(b2)
-	v.add_child(H.lbl("v0.1.2 · Prototyp", 10, Color(H.MUTED, 0.6), H.F_MONO))
+	v.add_child(H.lbl("v0.2.0 · Prototyp", 10, Color(H.MUTED, 0.6), H.F_MONO))
 	if not _prev_session.is_empty() and not _prev_session.get("clean", true):
 		var info := H.wrap("Letzte Sitzung wurde unerwartet beendet nach %d s (%s, Story %d)." % [int(_prev_session.get("uptime", 0)), _prev_session.get("state", "?"), int(_prev_session.get("story", 0))], 11, H.RED)
 		info.custom_minimum_size = Vector2(260, 0)
@@ -228,7 +234,7 @@ func perfect_dash() -> void:
 	audio.play("perfect", -2.0, 0.0)
 
 func active_boss() -> Enemy:
-	for b in [instructor, drax, nest]:
+	for b in [instructor, brood, butcher, drax, nest]:
 		if b != null and is_instance_valid(b) and b.state != "dead" and b.aggro and b.global_position.distance_to(player.global_position) < 26.0:
 			return b
 	return null
@@ -373,6 +379,390 @@ func spit_incoming(pos: Vector3) -> bool:
 			return true
 	return false
 
+# ---------- Blut, Treffer, Beute ----------
+
+const SPLAT_SHADER := preload("res://shaders/splat.gdshader")
+
+func cam_punch(a: float) -> void:
+	_cam_dist = maxf(0.8, _cam_dist - a)
+
+func blood_hit(en: Enemy, from: Vector3, big: bool) -> void:
+	if not is_instance_valid(en):
+		return
+	var col := en.blood_color()
+	var dir := en.global_position - from
+	dir.y = 0
+	dir = dir.normalized() if dir.length() > 0.01 else Vector3.FORWARD
+	var p := CPUParticles3D.new()
+	var m := SphereMesh.new()
+	m.radius = 0.05
+	m.height = 0.1
+	m.radial_segments = 4
+	m.rings = 2
+	p.mesh = m
+	p.material_override = Toon.mat(col, {"emit": col * 0.4, "energy": 1.0})
+	p.amount = 14 if big else 8
+	p.lifetime = 0.5
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.direction = (dir + Vector3(0, 0.6, 0)).normalized()
+	p.spread = 35.0
+	p.initial_velocity_min = 3.0
+	p.initial_velocity_max = 7.5 if big else 5.0
+	p.gravity = Vector3(0, -16.0, 0)
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.6 if big else 1.1
+	p.position = en.global_position + Vector3(0, 1.1 if en.kind != "brood" else 2.0, 0)
+	p.emitting = true
+	add_child(p)
+	fx.append({"n": p, "t": 0.0, "life": 0.9, "kind": "free"})
+	if big or randf() < 0.3:
+		splat(en.global_position + dir * randf_range(0.6, 1.4), col, randf_range(0.7, 1.3) if not big else randf_range(1.1, 1.8))
+
+func splat(pos: Vector3, col: Color, size: float) -> void:
+	var mi := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(size, size)
+	mi.mesh = q
+	var mat := ShaderMaterial.new()
+	mat.shader = SPLAT_SHADER
+	mat.set_shader_parameter("color", Color(col.r * 0.7, col.g * 0.7, col.b * 0.7, 0.85))
+	mat.set_shader_parameter("seed", randf() * 100.0)
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.rotation = Vector3(-PI * 0.5, randf() * TAU, 0)
+	mi.position = Vector3(pos.x, 0.03 + decals.size() * 0.0004, pos.z)
+	add_child(mi)
+	decals.append({"n": mi, "m": mat, "t": 0.0})
+	if decals.size() > 40:
+		var old: Dictionary = decals.pop_front()
+		(old.n as Node).queue_free()
+
+func _update_decals(delta: float) -> void:
+	for d in decals:
+		d.t += delta
+		if float(d.t) > 22.0:
+			(d.m as ShaderMaterial).set_shader_parameter("alpha", clampf(1.0 - (float(d.t) - 22.0) / 6.0, 0.0, 1.0))
+	while decals.size() > 0 and float(decals[0].t) > 28.0:
+		var old: Dictionary = decals.pop_front()
+		(old.n as Node).queue_free()
+
+func kill_feedback(en: Enemy) -> void:
+	if en.is_boss():
+		_slow_until = Time.get_ticks_msec() + 1300
+		_slow_scale = 0.22
+		shake(1.0)
+		hud.show_banner("%s BESIEGT" % en.display_name().to_upper())
+		audio.play("boom", 0.0, 0.0)
+		for i in 3:
+			splat(en.global_position + Vector3(randf_range(-1.5, 1.5), 0, randf_range(-1.5, 1.5)), en.blood_color(), randf_range(1.5, 2.6))
+	else:
+		hitstop(0.07)
+		splat(en.global_position, en.blood_color(), randf_range(1.2, 1.9))
+
+func shockwave(pos: Vector3, radius: float, col: Color) -> void:
+	var mi := MeshInstance3D.new()
+	mi.mesh = _ring_mesh
+	var mat := (Toon.holo(col, 2.4, false, 0.0)).duplicate()
+	mat.set_shader_parameter("ribbon", 1.0)
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = pos + Vector3(0, 0.15, 0)
+	mi.scale = Vector3.ONE * 0.3
+	add_child(mi)
+	fx.append({"n": mi, "t": 0.0, "life": 0.35, "kind": "grow", "to": radius / 2.0, "spin": 3.0})
+	burst(pos + Vector3(0, 0.3, 0), col, 1.6)
+	if pos.distance_to(player.global_position) < 14.0:
+		shake(0.45)
+	sfx("boom")
+
+func roll_loot(en: Enemy) -> void:
+	var zone := academy.zone_at(en.global_position)
+	if Academy.CRYPT_ZONES.has(zone):
+		PlayerStats.side_progress("brann_crypt")
+	var lvl := int(round((en.level_mult - 1.0) / 0.12 + 1))
+	var shards := {"karkosa": 1, "karkosa_elite": 4, "mutant": 2, "cadet": 2, "drax": 25, "instructor": 40, "nest": 20, "butcher": 35, "brood": 80}.get(en.kind, 1) as int
+	shards += randi() % 2
+	PlayerStats.add_shards(shards)
+	PlayerStats.system_message.emit("+%d Blutsplitter" % shards, "mini")
+	var chance := {"karkosa": 0.07, "karkosa_elite": 0.35, "mutant": 0.12, "cadet": 0.15}.get(en.kind, 1.0) as float
+	if randf() > chance:
+		return
+	var it: Dictionary
+	match en.kind:
+		"brood":
+			it = Items.make("weapon", lvl + 1, 3)
+		"butcher", "instructor":
+			it = Items.random_drop(lvl + 1, 0.2, 2)
+		"drax", "nest":
+			it = Items.random_drop(lvl, 0.1, 1)
+		"karkosa_elite":
+			it = Items.random_drop(lvl, 0.08)
+		_:
+			it = Items.random_drop(lvl)
+	spawn_loot(it, en.global_position)
+	if en.is_boss() and en.kind != "brood":
+		spawn_loot(Items.random_drop(lvl, 0.05, 1), en.global_position + Vector3(1.2, 0, 0.6))
+
+func spawn_loot(it: Dictionary, pos: Vector3) -> void:
+	var n := Node3D.new()
+	var col := Items.color(it)
+	var beam := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.06
+	cm.bottom_radius = 0.22
+	cm.height = 3.2 + int(it.rarity) * 0.8
+	cm.radial_segments = 8
+	cm.rings = 1
+	beam.mesh = cm
+	beam.material_override = Toon.holo(col, 1.0 + int(it.rarity) * 0.4, false, 0.4)
+	beam.position.y = cm.height * 0.5
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(beam)
+	var icon := MeshInstance3D.new()
+	var shape: Mesh
+	match String(it.slot):
+		"weapon":
+			var pm := PrismMesh.new()
+			pm.size = Vector3(0.12, 0.8, 0.05)
+			shape = pm
+		"armor":
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.45, 0.5, 0.15)
+			shape = bm
+		_:
+			var sm := SphereMesh.new()
+			sm.radius = 0.2
+			sm.height = 0.4
+			sm.radial_segments = 8
+			sm.rings = 4
+			shape = sm
+	icon.mesh = shape
+	icon.material_override = Toon.mat(col, {"emit": col, "energy": 1.4, "outline": 0.025})
+	icon.position.y = 0.75
+	icon.name = "Icon"
+	n.add_child(icon)
+	var l := Label3D.new()
+	l.text = String(it.name)
+	l.font = H.F_BOLD
+	l.font_size = 40
+	l.pixel_size = 0.006
+	l.modulate = col
+	l.outline_size = 12
+	l.outline_modulate = Color(0, 0, 0, 0.85)
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.position.y = 1.5
+	n.add_child(l)
+	var ring := Toon.quad_holo(n, Vector2(1.4, 1.4), Vector3(0, 0.05, 0), Toon.holo(col, 1.2, true, 0.0))
+	ring.name = "Ring"
+	n.position = pos + Vector3(randf_range(-0.6, 0.6), 0, randf_range(-0.6, 0.6))
+	add_child(n)
+	loot.append({"n": n, "item": it, "t": 0.0})
+	if int(it.rarity) >= 2:
+		audio.play("quest", -4.0, 0.0)
+
+func _update_loot(delta: float) -> void:
+	var keep: Array = []
+	for d in loot:
+		var n: Node3D = d.n
+		d.t += delta
+		var icon := n.get_node("Icon") as Node3D
+		icon.rotation.y += delta * 2.5
+		icon.position.y = 0.75 + sin(float(d.t) * 3.0) * 0.1
+		if float(d.t) > 0.5 and not player.dead and n.global_position.distance_to(player.global_position) < 1.3:
+			if PlayerStats.add_item(d.item):
+				burst(n.global_position + Vector3(0, 0.8, 0), Items.color(d.item), 0.9)
+				sfx("tick")
+				n.queue_free()
+				continue
+			d.t = -3.0
+		keep.append(d)
+	loot = keep
+
+# ---------- NPCs ----------
+
+func _spawn_npcs() -> void:
+	var mira := Npc.create("mira", "Mira", Looks.mira(), Academy.MIRA_POS, PI, self)
+	add_child(mira)
+	npcs["mira"] = mira
+	var brann := Npc.create("brann", "Brann", Looks.brann(), Academy.BRANN_POS, PI, self)
+	brann.talk_range = 3.9
+	add_child(brann)
+	npcs["brann"] = brann
+
+func _update_npc_markers() -> void:
+	var st := int(PlayerStats.s.story)
+	var mira: Npc = npcs.get("mira")
+	var brann: Npc = npcs.get("brann")
+	if mira:
+		var ms := PlayerStats.side_state("mira_blood")
+		mira.set_marker(st == 5 or ms == "ready" or (ms == "active" and int(PlayerStats.s.inventory.karkosa) >= 2), "!" if st == 5 else "?")
+	if brann:
+		var bp := PlayerStats.side_state("brann_pest")
+		var bc := PlayerStats.side_state("brann_crypt")
+		brann.set_marker((st >= 2 and bp == "") or bp == "ready" or bc == "ready" or (st >= 8 and bc == ""), "?" if bp == "ready" or bc == "ready" else "!")
+
+func _talk(id: String) -> void:
+	var npc: Npc = npcs[id]
+	npc.talking = true
+	var st := int(PlayerStats.s.story)
+	var lines: Array = []
+	var after := func(): pass
+	match id:
+		"mira":
+			var ms := PlayerStats.side_state("mira_blood")
+			if st < 5:
+				lines = [{"who": "Mira", "text": "Hm? Lass mich in Ruhe, Ungeformter. Drax beobachtet uns."}]
+			elif st == 5:
+				lines = [
+					{"who": "Mira", "text": "Da bist du ja. Ich hab dich gesehen – im Archiv. Deine Augen haben rot geleuchtet."},
+					{"who": "Mira", "text": "Keine Angst, ich verrate nichts. Mein Bruder war auch ein Ungeformter. Er ist vor einem Jahr in den Katakomben verschwunden."},
+					{"who": "Mira", "text": "Unter dem Archiv gibt es einen alten Aufzug. Brann, der Quartiermeister, hatte die Zugangskarte …"},
+					{"who": "Mira", "text": "… bis ihm ein riesiger Mutant – der Schlächter – sie im Innenhof abgenommen hat. Hol sie zurück. Bitte."},
+					{"who": "Mira", "text": "Und noch was: Wenn du Karkosa-Blut übrig hast, bring mir zwei Essenzen. Ich will verstehen, was es mit uns macht."},
+				]
+				after = func():
+					PlayerStats.set_story(6)
+					PlayerStats.side_start("mira_blood")
+			elif ms == "active" and int(PlayerStats.s.inventory.karkosa) >= 2:
+				lines = [
+					{"who": "Mira", "text": "Zwei Essenzen! Danke. Ich habe die Daten aus den Krankenakten gelöscht, die dich verraten hätten."},
+					{"who": "Mira", "text": "Nimm das hier. Mein Bruder hat es getragen."},
+				]
+				after = func():
+					PlayerStats.s.inventory.karkosa = int(PlayerStats.s.inventory.karkosa) - 2
+					PlayerStats.s.side.mira_blood.progress = 2
+					PlayerStats.side_finish("mira_blood")
+					PlayerStats.s.suspicion = maxf(0.0, float(PlayerStats.s.suspicion) - 30.0)
+					PlayerStats.system_message.emit("Verdacht −30 %", "reward")
+					spawn_loot(Items.make("relic", int(PlayerStats.s.level), 2), player.global_position + player.facing * 1.2)
+			elif ms == "active":
+				lines = [{"who": "Mira", "text": "Zwei Karkosa-Essenzen, mehr brauche ich nicht. Du findest sie bei den Insekten."}]
+			elif st == 6:
+				lines = [{"who": "Mira", "text": "Der Schlächter treibt sich im Innenhof herum. Pass auf seine Schläge auf – der Boden bebt."}]
+			elif st == 7:
+				lines = [{"who": "Mira", "text": "Du hast die Karte! Der Aufzug steht in der Südost-Ecke des Archivs. Finde heraus, was da unten ist."}]
+			elif st < 10:
+				lines = [{"who": "Mira", "text": "Hast du etwas über meinen Bruder gefunden? … Nein? Dann such weiter. Bitte."}]
+			else:
+				lines = [{"who": "Mira", "text": "Die Brutmutter ist tot. Wenigstens weiß ich jetzt, was meinen Bruder geholt hat. Danke, Nachtfürst."}]
+		"brann":
+			var bp := PlayerStats.side_state("brann_pest")
+			var bc := PlayerStats.side_state("brann_crypt")
+			if bp == "ready":
+				lines = [{"who": "Brann", "text": "Fünfzehn Insekten weniger. Gute Arbeit, Kleiner. Hier – frisch aus dem Lager."}]
+				after = func():
+					PlayerStats.side_finish("brann_pest")
+					PlayerStats.add_shards(60)
+					spawn_loot(Items.random_drop(int(PlayerStats.s.level), 0.1, 2), player.global_position + player.facing * 1.2)
+			elif bc == "ready":
+				lines = [{"who": "Brann", "text": "Du kommst lebend aus der Gruft zurück? Respekt. Das hier hab ich für dich aufgehoben."}]
+				after = func():
+					PlayerStats.side_finish("brann_crypt")
+					PlayerStats.add_shards(120)
+					spawn_loot(Items.random_drop(int(PlayerStats.s.level) + 1, 0.2, 2), player.global_position + player.facing * 1.2)
+			elif st >= 8 and bc == "":
+				lines = [{"who": "Brann", "text": "Du gehst also wirklich da runter. Räum unten auf – zehn von den Biestern – und ich zahl dich gut."}]
+				after = func():
+					PlayerStats.side_start("brann_crypt")
+					_open_shop()
+			elif st >= 2 and bp == "":
+				lines = [
+					{"who": "Brann", "text": "Quartiermeister Brann. Ausrüstung gegen Blutsplitter – frag nicht, wofür ich die brauche."},
+					{"who": "Brann", "text": "Die Karkosa fressen mir das Lager leer. Vernichte fünfzehn von ihnen und ich lege was Gutes zurück."},
+				]
+				after = func():
+					PlayerStats.side_start("brann_pest")
+					_open_shop()
+			elif st == 7:
+				lines = [{"who": "Brann", "text": "Meine Karte! Behalt sie. Was da unten ist, will ich nicht wissen. Aber kauf vorher ein."}]
+				after = _open_shop
+			else:
+				lines = [{"who": "Brann", "text": ["Was darf's sein?", "Splitter auf den Tresen.", "Frische Ware, kaum Blut dran."][randi() % 3]}]
+				after = _open_shop
+	_cutscene_at(npc.global_position, lines, func():
+		npc.talking = false
+		after.call())
+
+func _open_shop() -> void:
+	hud.release_all()
+	menu.shop_open = true
+	menu.open("shop")
+	get_tree().paused = true
+
+# ---------- Kapitel 2 ----------
+
+func _use_lift(down: bool) -> void:
+	if not PlayerStats.s.get("lift_unlocked", false):
+		PlayerStats.system_message.emit("Gesperrt. Eine Zugangskarte wird benötigt.", "warn")
+		return
+	state = "cutscene"
+	hud.fade_t = 0.0
+	audio.play("awaken", -8.0, 0.0)
+	await get_tree().create_timer(0.45, true, false, true).timeout
+	var dest := Academy.CRYPT_LIFT + Vector3(0, 0, -2.2) if down else Academy.LIFT_POS + Vector3(-2.0, 0, 0)
+	player.global_position = dest
+	player.facing = Vector3(0, 0, -1) if down else Vector3(-1, 0, 0)
+	_cam_focus = dest
+	for e in ambient:
+		if is_instance_valid(e):
+			(e as Node).queue_free()
+	ambient.clear()
+	await get_tree().create_timer(0.5, true, false, true).timeout
+	state = "play"
+	if down and int(PlayerStats.s.story) == 7:
+		_cutscene_at(dest, [
+			{"who": "", "text": "Der Aufzug kreischt in die Tiefe. Kalte Luft, Kerzenwachs und der Geruch von altem Blut."},
+			{"who": "PROTOKOLL", "text": "Ich kenne diesen Ort. Hier unten liegen meine Erinnerungen verstreut. Sammle sie, Wirt."},
+		], func(): PlayerStats.set_story(8))
+
+func _touch_fragment(i: int) -> void:
+	var texts := [
+		"2071. Die Gründer öffnen das erste abgestürzte Karkosa-Schiff. In seinem Herzen pulsiert ein Organismus, der Blut in Macht verwandelt. Sie nennen ihn ‚Sanguine‘.",
+		"Der erste Wirt war ein Kadett wie du. Ungeformt, freiwillig. Er zerschlug eine ganze Karkosa-Brutflotte – und wurde danach nie wieder satt.",
+		"Sie versiegelten ihn hier unten und mich mit ihm. Doch die Karkosa fanden sein Blut. Sie bauten etwas daraus. Etwas, das brütet.",
+	]
+	var frags: Array = PlayerStats.s.fragments
+	if frags.has(i):
+		return
+	frags.append(i)
+	audio.play("awaken", -4.0, 0.0)
+	hud.red_flash = 0.5
+	_cutscene_at(Academy.FRAGMENTS[i], [
+		{"who": "SYSTEM", "text": "ERINNERUNGSFRAGMENT %d/3 SYNCHRONISIERT" % frags.size()},
+		{"who": "PROTOKOLL", "text": texts[i]},
+	], func():
+		PlayerStats.add_xp(120)
+		PlayerStats.story_advance_progress(8))
+
+func _chapter2_director() -> void:
+	var st := int(PlayerStats.s.story)
+	var z := academy.zone_at(player.global_position)
+	if st == 6 and z == "courtyard" and (butcher == null or not is_instance_valid(butcher)):
+		butcher = spawn_enemy("butcher", Academy.BUTCHER_POS + Vector3(0, 0, 5), max(3, int(PlayerStats.s.level) + 1))
+		butcher.aggro = false
+		butcher.died.connect(func(_e):
+			PlayerStats.s.lift_unlocked = true
+			PlayerStats.system_message.emit("Zugangskarte erhalten! Der alte Aufzug im Archiv ist frei.", "reward")
+			PlayerStats.story_advance_progress(6))
+		_cutscene_at(butcher.global_position, [
+			{"who": "", "text": "Zwischen den Bäumen richtet sich etwas Riesiges auf. An seinem Gürtel baumelt eine Zugangskarte."},
+			{"who": "SYSTEM", "text": "Warnung: Flächenangriff. Rote Kreise auf dem Boden zeigen den Einschlag – rechtzeitig wegdashen!"},
+		], func(): butcher.aggro = true)
+	if st == 9 and z == "brood" and (brood == null or not is_instance_valid(brood)):
+		brood = spawn_enemy("brood", Academy.BROOD_POS, max(5, int(PlayerStats.s.level) + 2))
+		brood.aggro = false
+		brood.died.connect(func(_e):
+			PlayerStats.story_advance_progress(9)
+			hud.show_banner("KAPITEL 2 ABGESCHLOSSEN")
+			audio.play("level", -2.0, 0.0)
+			PlayerStats.add_shards(150))
+		_cutscene_at(Academy.BROOD_POS, [
+			{"who": "", "text": "Die Kammer atmet. Aus dem Harz schält sich ein gewaltiger Leib mit glühenden Eiersäcken."},
+			{"who": "PROTOKOLL", "text": "Sie ist aus seinem Blut gewachsen. Aus meinem Blut. Beende es, Wirt."},
+		], func(): brood.aggro = true)
+
 # ---------- Effekt-Ressourcen ----------
 
 func _build_fx_assets() -> void:
@@ -408,6 +798,7 @@ func toggle_menu() -> void:
 		return
 	if menu.visible:
 		menu.visible = false
+		menu.shop_open = false
 		get_tree().paused = false
 		PlayerStats.save_game()
 	else:
@@ -505,6 +896,9 @@ func _process(delta: float) -> void:
 	_update_capsules(delta)
 	_update_spits(delta)
 	_update_fx(delta, rd)
+	_update_loot(delta)
+	_update_decals(delta)
+	_update_npc_markers()
 	_director(delta)
 	_check_midnight()
 	if death_t >= 0.0:
@@ -550,6 +944,27 @@ func _update_interact() -> void:
 	hud.interact_text = ""
 	if state != "play" or player.dead:
 		return
+	var pp := player.global_position
+	for id in npcs:
+		var npc: Npc = npcs[id]
+		if pp.distance_to(npc.global_position) < npc.talk_range:
+			interact_id = "npc:" + id
+			hud.interact_text = "MIT %s SPRECHEN" % npc.display.to_upper()
+			return
+	if pp.distance_to(Academy.LIFT_POS) < 1.8:
+		interact_id = "lift_down"
+		hud.interact_text = "AUFZUG: KATAKOMBEN" if PlayerStats.s.lift_unlocked else "AUFZUG (GESPERRT)"
+		return
+	if pp.distance_to(Academy.CRYPT_LIFT) < 1.8:
+		interact_id = "lift_up"
+		hud.interact_text = "AUFZUG: ARCHIV"
+		return
+	if int(PlayerStats.s.story) == 8:
+		for i in Academy.FRAGMENTS.size():
+			if not (PlayerStats.s.fragments as Array).has(i) and pp.distance_to(Academy.FRAGMENTS[i]) < 2.0:
+				interact_id = "frag:%d" % i
+				hud.interact_text = "ERINNERUNG BERÜHREN"
+				return
 	if player.global_position.distance_to(Academy.RELIC_POS) < 3.0:
 		var st := int(PlayerStats.s.story)
 		if st == 0:
@@ -563,7 +978,17 @@ func _update_interact() -> void:
 			hud.interact_text = "AM RELIKT RUHEN"
 
 func _interact() -> void:
+	if interact_id.begins_with("npc:"):
+		_talk(interact_id.substr(4))
+		return
+	if interact_id.begins_with("frag:"):
+		_touch_fragment(int(interact_id.substr(5)))
+		return
 	match interact_id:
+		"lift_down":
+			_use_lift(true)
+		"lift_up":
+			_use_lift(false)
 		"awaken":
 			_awaken()
 		"relic_talk":
@@ -677,6 +1102,7 @@ func _director(delta: float) -> void:
 		return
 	if st < 2:
 		return
+	_chapter2_director()
 	# Umherstreifende Gegner
 	ambient = ambient.filter(func(e): return is_instance_valid(e) and (e as Enemy).state != "dead")
 	var target := mini(9, 4 + int(PlayerStats.s.level) / 3)
@@ -689,8 +1115,13 @@ func _spawn_ambient() -> void:
 	var h := PlayerStats.clock_hour()
 	var night := h >= 22 or h < 5
 	var options := []
+	var st := int(PlayerStats.s.story)
 	for zone in academy.spawns:
 		if zone == "breach":
+			continue
+		if zone == "courtyard" and not night:
+			continue
+		if Academy.CRYPT_ZONES.has(zone) and st < 8:
 			continue
 		for p in academy.spawns[zone]:
 			var d: float = (p as Vector3).distance_to(player.global_position)
@@ -715,6 +1146,10 @@ func _spawn_ambient() -> void:
 			kind = "cadet" if cadets < 2 and r < 0.7 else "karkosa"
 		"eastwing":
 			kind = "karkosa_elite" if r < 0.18 + int(PlayerStats.s.level) * 0.01 else ("mutant" if r < 0.45 else "karkosa")
+		"courtyard":
+			kind = "karkosa" if r < 0.7 else "mutant"
+		"crypt", "ossuary":
+			kind = "mutant" if r < 0.5 else ("karkosa_elite" if r < 0.65 else "karkosa")
 	var e := spawn_enemy(kind, (pick[1] as Vector3) + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)))
 	ambient.append(e)
 
@@ -774,11 +1209,12 @@ func _respawn() -> void:
 	s.xp = int(int(s.xp) * 0.8)
 	s.hp = PlayerStats.max_hp()
 	s.blood = max(float(s.blood), 45.0)
-	player.revive(Academy.RESPAWN)
+	var spot := Academy.CRYPT_RESPAWN if Academy.CRYPT_ZONES.has(last_zone) else Academy.RESPAWN
+	player.revive(spot)
 	_cam_focus = player.global_position
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var en := e as Enemy
-		if en.global_position.distance_to(Academy.RESPAWN) < 12.0 and not en.is_boss() and not en.has_meta("wave"):
+		if en.global_position.distance_to(spot) < 12.0 and not en.is_boss() and not en.has_meta("wave"):
 			en.aggro = false
 			en.global_position = en.home
 	PlayerStats.system_message.emit("Wirt stabilisiert. −20 % EXP der aktuellen Stufe.", "sys")

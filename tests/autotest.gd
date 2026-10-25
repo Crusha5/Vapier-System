@@ -139,6 +139,113 @@ func _ready() -> void:
 	check(int(PlayerStats.s.story) == 5, "Kapitel 1 abgeschlossen")
 	await wait(20)
 	await shot("10_chapter_done")
+	# ===== Kapitel 2 =====
+	for e in get_tree().get_nodes_in_group("enemies"):
+		e.queue_free()
+	PlayerStats.s.clock = 14.0 * 60.0
+	await place(Academy.MIRA_POS + Vector3(0, 0, 2.0), Vector3(0, 0, -1))
+	await wait(10)
+	check(main.interact_id == "npc:mira", "Mira ansprechbar")
+	await shot("20_dorm_mira")
+	main._interact()
+	await wait(4)
+	await shot("21_mira_talk")
+	await skip_narration()
+	check(int(PlayerStats.s.story) == 6, "Kapitel 2: Gestohlene Karte")
+	check(PlayerStats.side_state("mira_blood") == "active", "Nebenquest Blutschuld aktiv")
+	# Nebenquest abgeben
+	PlayerStats.s.inventory.karkosa = 3
+	await wait(2)
+	main._interact()
+	await skip_narration()
+	check(PlayerStats.side_state("mira_blood") == "done", "Blutschuld abgegeben")
+	await wait(30)
+	check(PlayerStats.s.bag.size() >= 1, "Belohnung aufgehoben")
+	# Innenhof – Schlächter
+	await place(Vector3(24, 0, 5), Vector3(0, 0, 1))
+	await wait(20)
+	check(main.butcher != null, "Schlächter erscheint")
+	await shot("22_courtyard_butcher")
+	await skip_narration()
+	PlayerStats.s.str = 22
+	PlayerStats.s.end = 14
+	PlayerStats.heal(9999)
+	frames = await fight(6000, func(): return int(PlayerStats.s.story) >= 7)
+	print("Schlächter nach ", frames, " Frames")
+	check(int(PlayerStats.s.story) == 7 and PlayerStats.s.lift_unlocked, "Schlächter besiegt, Aufzug frei")
+	await shot("23_butcher_dead")
+	await wait(30)
+	# Mensa – Laden
+	for e in get_tree().get_nodes_in_group("enemies"):
+		e.queue_free()
+	await place(Academy.BRANN_POS + Vector3(0, 0, 3.4), Vector3(0, 0, -1))
+	await wait(10)
+	await shot("24_mensa_brann")
+	check(main.interact_id == "npc:brann", "Brann ansprechbar")
+	main._interact()
+	await skip_narration()
+	await wait(4)
+	check(main.menu.visible and main.menu.tab == "shop", "Laden geöffnet")
+	PlayerStats.s.shards = 2000
+	main.menu.rebuild()
+	await wait(4)
+	await shot("25_shop")
+	var bag_before: int = PlayerStats.s.bag.size()
+	PlayerStats.buy(0)
+	check(PlayerStats.s.bag.size() == bag_before + 1, "Gegenstand gekauft")
+	# Sense anlegen
+	PlayerStats.s.bag.append(Items.make("weapon", 6, 3, "scythe"))
+	PlayerStats.equip_item(PlayerStats.s.bag.size() - 1)
+	check(PlayerStats.weapon_type() == "scythe", "Schattensense angelegt")
+	main.menu.open("gear")
+	await wait(4)
+	await shot("26_gear")
+	main.toggle_menu()
+	await wait(4)
+	# Beute am Boden
+	main.spawn_loot(Items.make("armor", 6, 2), main.player.global_position + Vector3(2.5, 0, 0))
+	main.spawn_loot(Items.make("relic", 6, 3), main.player.global_position + Vector3(-2.5, 0, 0))
+	await wait(10)
+	await shot("27_loot_beams")
+	# Aufzug in die Katakomben
+	await place(Academy.LIFT_POS + Vector3(0, 0, 0.5))
+	await wait(5)
+	check(main.interact_id == "lift_down", "Aufzug benutzbar")
+	main._interact()
+	await get_tree().create_timer(1.3, true, false, true).timeout
+	await skip_narration()
+	check(int(PlayerStats.s.story) == 8, "In den Katakomben: Erinnerungen")
+	await wait(20)
+	await shot("28_crypt")
+	for i in 3:
+		await place(Academy.FRAGMENTS[i] + Vector3(0, 0, 1.2))
+		await wait(4)
+		if i == 0:
+			await shot("29_ossuary_fragment")
+		main._interact()
+		await skip_narration()
+	check(int(PlayerStats.s.story) == 9, "Alle Erinnerungen gefunden")
+	# Brutmutter
+	for e in get_tree().get_nodes_in_group("enemies"):
+		e.queue_free()
+	PlayerStats.s.str = 34
+	PlayerStats.s.end = 22
+	PlayerStats.heal(9999)
+	await place(Vector3(-60, 0, -55), Vector3(0, 0, -1))
+	await wait(20)
+	check(main.brood != null, "Brutmutter erscheint")
+	await skip_narration()
+	await wait(40)
+	await shot("30_brood_fight")
+	frames = await fight(9000, func(): return int(PlayerStats.s.story) >= 10)
+	print("Brutmutter nach ", frames, " Frames")
+	check(int(PlayerStats.s.story) == 10, "Kapitel 2 abgeschlossen")
+	await wait(20)
+	await shot("31_chapter2_done")
+	await place(Academy.CRYPT_LIFT + Vector3(0, 0, -0.5))
+	main._interact()
+	await get_tree().create_timer(1.3, true, false, true).timeout
+	check(main.academy.zone_at(main.player.global_position) == "archive", "Aufzug zurück ins Archiv")
 	# --- System-Menü ---
 	PlayerStats.s.attr_points = 3
 	PlayerStats.s.skill_points = 2

@@ -25,6 +25,10 @@ var cast_pending := ""
 var cast_t := 0.0
 var trail_t := 0.0
 var steps_t := 0.0
+var trail: BladeTrail
+var trail_l: BladeTrail
+var hit_streak := 0       # Kombo-Zähler (Treffer in Folge)
+var streak_t := 0.0
 
 func _ready() -> void:
 	collision_layer = 2
@@ -36,15 +40,37 @@ func _ready() -> void:
 	cs.shape = sh
 	cs.position.y = 0.85
 	add_child(cs)
-	model = Humanoid.new({"suit": Color(0.1, 0.1, 0.14), "accent": Toon.RED, "hair": Color(0.06, 0.05, 0.08),
-		"skin": Color(0.82, 0.7, 0.66), "eyes": Color(0.85, 0.9, 1.0), "glow": 0.0, "cape": true})
+	model = Humanoid.new(Looks.player())
 	add_child(model)
-	model.add_blade(Toon.RED, 0.95)
+	refresh_weapon()
+	PlayerStats.equipment_changed.connect(refresh_weapon)
 	refresh_awakening()
+
+func refresh_weapon() -> void:
+	var w := PlayerStats.weapon_def()
+	var it: Dictionary = PlayerStats.s.equip.get("weapon", {})
+	var col := Toon.RED
+	if not it.is_empty() and int(it.rarity) >= 3:
+		col = Color(1.0, 0.35, 0.15)
+	elif not it.is_empty() and int(it.rarity) == 2:
+		col = Color(1.0, 0.1, 0.45)
+	model.add_blade(col, float(w.len), float(w.width))
+	if PlayerStats.weapon_type() == "daggers":
+		model.add_blade_left(col, float(w.len), float(w.width))
+	else:
+		model.remove_blade_left()
+	if trail == null:
+		trail = BladeTrail.new()
+		world.add_child(trail)
+		trail_l = BladeTrail.new()
+		world.add_child(trail_l)
+	trail.color = col
+	trail_l.color = col
+	model.set_blade_visible(PlayerStats.s.awakened)
 
 func refresh_awakening() -> void:
 	var awake: bool = PlayerStats.s.awakened
-	model.blade.visible = awake
+	model.set_blade_visible(awake)
 	if awake:
 		model.set_eye_glow(Color(1.0, 0.1, 0.15), 3.0)
 	else:
@@ -65,6 +91,14 @@ func _physics_process(delta: float) -> void:
 	combo_timer -= delta
 	if combo_timer <= 0.0:
 		combo = 0
+	streak_t -= delta
+	if streak_t <= 0.0 and hit_streak > 0:
+		hit_streak = 0
+	if trail and model.blade:
+		var swinging := model.action == "attack" or cast_pending != ""
+		trail.feed(model.blade_base(), model.blade_tip(), swinging, delta)
+		if model.blade_l:
+			trail_l.feed(model.blade_base(true), model.blade_tip(true), swinging, delta)
 	attack_t -= delta
 	hurt_t -= delta
 	PlayerStats.invulnerable = dash_t > 0.0
@@ -164,7 +198,9 @@ func _resolve_melee(c: int) -> void:
 	var dmg: float = PlayerStats.melee_damage() * mults[c]
 	if world.eclipse_active():
 		dmg *= 1.5
-	var reach := 2.5 if c < 2 else 2.9
+	var w := PlayerStats.weapon_def()
+	var reach := (2.5 if c < 2 else 2.9) + float(w.reach)
+	var arc: float = 0.15 + float(w.arc) - 0.15
 	var hits := 0
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var en := e as Enemy
@@ -175,21 +211,43 @@ func _resolve_melee(c: int) -> void:
 		var l := d.length() - float(en.cfg.radius)
 		if l > reach:
 			continue
-		if c < 2 and l > 0.4 and facing.dot(d.normalized()) < 0.15:
+		if c < 2 and l > 0.4 and facing.dot(d.normalized()) < arc:
 			continue
 		var crit := randf() < PlayerStats.crit_chance()
 		var amount := dmg * (1.8 if crit else 1.0) * randf_range(0.92, 1.08)
+		var was_alive := en.hp > 0.0
 		en.take_hit(amount, global_position, 9.0 if c == 2 else 4.0, crit, Color(1.0, 0.85, 0.3) if crit else Color(1, 1, 1))
+		world.blood_hit(en, global_position, crit or c == 2)
+		if was_alive and en.hp <= 0.0:
+			world.kill_feedback(en)
 		hits += 1
 	if hits > 0:
-		world.hitstop(0.05 if c < 2 else 0.09)
+		world.hitstop((0.05 if c < 2 else 0.09) + (0.03 if hits > 2 else 0.0))
 		world.shake(0.15 if c < 2 else 0.35)
+		world.cam_punch(0.05 if c < 2 else 0.1)
 		world.sfx("hit")
 		world.slash_fx(global_position, facing, c)
+		register_hits(hits)
+		var leech := PlayerStats.gear("leech") * hits
 		if PlayerStats.has_skill("crimson_feast"):
-			PlayerStats.add_blood(1.5 * hits)
+			leech += 1.5 * hits
+		if leech > 0.0:
+			PlayerStats.add_blood(leech)
 	else:
 		world.slash_fx(global_position, facing, c)
+
+## Kombo-Zähler: ab 15 Treffern Blutrausch (+15 % Schaden)
+func register_hits(n: int) -> void:
+	hit_streak += n
+	streak_t = 2.6
+	if hit_streak > int(PlayerStats.s.best_combo):
+		PlayerStats.s.best_combo = hit_streak
+	if hit_streak >= 15:
+		if not PlayerStats.buffs.has("frenzy"):
+			PlayerStats.system_message.emit("BLUTRAUSCH! +15 % Schaden", "blood")
+		PlayerStats.buffs["frenzy"] = 4.0
+	if hit_streak % 10 == 0 and hit_streak > 0:
+		PlayerStats.add_blood(3.0)
 
 func dash() -> void:
 	if dead or cds.dash > 0.0 or dash_t > 0.0 or world.input_locked():
@@ -272,7 +330,12 @@ func _resolve_cast(id: String) -> void:
 					continue
 				if en.global_position.distance_to(global_position) - float(en.cfg.radius) < 3.7:
 					var crit := randf() < PlayerStats.crit_chance()
+					var alive := en.hp > 0.0
 					en.take_hit(dmg * 1.1 * (1.8 if crit else 1.0), global_position, 8.0, crit, Toon.RED.lightened(0.3))
+					world.blood_hit(en, global_position, true)
+					register_hits(1)
+					if alive and en.hp <= 0.0:
+						world.kill_feedback(en)
 		"blood_lance":
 			world.lance_fx(global_position, facing)
 			world.shake(0.25)
@@ -286,7 +349,12 @@ func _resolve_cast(id: String) -> void:
 				var side := (d - facing * along).length()
 				if along > -0.5 and along < 11.5 and side < 1.2 + float(en.cfg.radius):
 					var crit := randf() < PlayerStats.crit_chance()
+					var alive := en.hp > 0.0
 					en.take_hit(dmg * 2.0 * (1.8 if crit else 1.0), global_position, 6.0, crit, Toon.RED.lightened(0.3))
+					world.blood_hit(en, global_position, true)
+					register_hits(1)
+					if alive and en.hp <= 0.0:
+						world.kill_feedback(en)
 
 func drink() -> void:
 	if dead or cds.drink > 0.0:

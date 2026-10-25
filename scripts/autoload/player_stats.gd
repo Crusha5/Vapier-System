@@ -8,6 +8,7 @@ signal system_message(text: String, kind: String)  # kind: sys, blood, warn, que
 signal quests_changed
 signal player_died
 signal suspicion_alarm
+signal equipment_changed
 
 const SAVE_PATH := "user://sanguine_save.json"
 const SAVE_VERSION := 1
@@ -59,8 +60,21 @@ const STORY := [
 	{"title": "Rangordnung", "text": "Stelle dich Rivale Drax in der Trainingshalle.", "goal": 1},
 	{"title": "Der Riss", "text": "Zerstöre das Karkosa-Nest im Ostflügel.", "goal": 1},
 	{"title": "Fragen ohne Antwort", "text": "Kehre zum Relikt zurück. Das Protokoll will sprechen."},
-	{"title": "Jäger der Nacht", "text": "Kapitel 1 abgeschlossen. Werde stärker – Kapitel 2 folgt."},
+	# Kapitel 2 – Knochen und Erinnerung
+	{"title": "Ein Verbündeter?", "text": "Eine Kadettin namens Mira will dich im Schlafsaal sprechen.", "chapter": 2},
+	{"title": "Gestohlene Karte", "text": "Besiege den Schlächter im Innenhof und hol Branns Zugangskarte zurück.", "goal": 1, "chapter": 2},
+	{"title": "Abstieg", "text": "Nutze den alten Aufzug im Archiv (Südost-Ecke), um in die Katakomben zu gelangen.", "chapter": 2},
+	{"title": "Erinnerungen in Knochen", "text": "Finde die Erinnerungsfragmente des ersten Wirts in den Katakomben.", "goal": 3, "chapter": 2},
+	{"title": "Die Brutmutter", "text": "Töte die Brutmutter in der Brutkammer tief unter der Akademie.", "goal": 1, "chapter": 2},
+	{"title": "Nachtfürst", "text": "Kapitel 2 abgeschlossen. Erkunde, jage, werde stärker – Kapitel 3 folgt.", "chapter": 2},
 ]
+
+## Nebenquests (von NPCs)
+const SIDE := {
+	"mira_blood": {"title": "Blutschuld", "giver": "Mira", "text": "Bring Mira 2 Karkosa-Blut-Essenzen für ihre Forschung.", "goal": 2},
+	"brann_pest": {"title": "Ungeziefer", "giver": "Brann", "text": "Vernichte 15 Karkosa für den Quartiermeister.", "goal": 15},
+	"brann_crypt": {"title": "Gruftplünderer", "giver": "Brann", "text": "Besiege 10 Gegner in den Katakomben.", "goal": 10},
+}
 
 var s: Dictionary = {}
 var buffs: Dictionary = {}  # name -> Restsekunden
@@ -94,6 +108,14 @@ func reset_game() -> void:
 		"clock": 21.0 * 60.0,  # Ingame-Minuten seit Mitternacht
 		"perfect_dashes": 0,
 		"deaths": 0,
+		"equip": {"weapon": Items.make("weapon", 1, 0, "blade"), "armor": {}, "relic": {}},
+		"bag": [],
+		"shards": 0,
+		"side": {},
+		"lift_unlocked": false,
+		"fragments": [],
+		"shop": {"day": "", "items": []},
+		"best_combo": 0,
 	}
 	buffs.clear()
 	s.hp = max_hp()
@@ -107,11 +129,28 @@ func stat(key: String) -> int:
 		v += 2
 	return v
 
+## Summe einer Eigenschaft über die angelegte Ausrüstung
+func gear(key: String) -> float:
+	var v := 0.0
+	for slot in s.equip:
+		var it: Dictionary = s.equip[slot]
+		if it.is_empty():
+			continue
+		v += float(it.base.get(key, 0.0)) + float(it.aff.get(key, 0.0))
+	return v
+
+func weapon_type() -> String:
+	var w: Dictionary = s.equip.get("weapon", {})
+	return String(w.get("type", "blade")) if not w.is_empty() else "blade"
+
+func weapon_def() -> Dictionary:
+	return Items.WEAPONS[weapon_type()]
+
 func penalty_active() -> bool:
 	return Time.get_unix_time_from_system() < float(s.penalty_until)
 
 func max_hp() -> float:
-	var v := 80.0 + stat("end") * 10.0 + (int(s.level) - 1) * 6.0
+	var v := 80.0 + stat("end") * 10.0 + (int(s.level) - 1) * 6.0 + gear("hp")
 	if penalty_active():
 		v *= 0.85
 	return v
@@ -123,19 +162,21 @@ func starving() -> bool:
 	return float(s.blood) <= 0.0
 
 func blood_drain() -> float:
-	return 0.42 / (1.0 + stat("end") * 0.06)
+	return 0.42 / (1.0 + stat("end") * 0.06) * maxf(0.4, 1.0 - gear("thrift"))
 
 func move_speed() -> float:
-	var v := 5.2 * (1.0 + stat("agi") * 0.02)
+	var v := 5.2 * (1.0 + stat("agi") * 0.02 + gear("speed"))
 	if starving():
 		v *= 0.82
 	return v
 
 func attack_speed() -> float:
-	return 1.0 + stat("agi") * 0.035
+	return (1.0 + stat("agi") * 0.035 + gear("aspd")) * float(weapon_def().aspd)
 
 func melee_damage() -> float:
-	var v := 9.0 + stat("str") * 2.4 + (int(s.level) - 1) * 0.8
+	var v := (9.0 + stat("str") * 2.4 + (int(s.level) - 1) * 0.8 + gear("atk")) * (1.0 + gear("dmg")) * float(weapon_def().dmg)
+	if buffs.has("frenzy"):
+		v *= 1.15
 	if buffs.has("karkosa"):
 		v *= 1.3
 	if starving():
@@ -143,7 +184,7 @@ func melee_damage() -> float:
 	return v
 
 func shadow_damage() -> float:
-	var v := 14.0 + stat("shd") * 4.5 + (int(s.level) - 1) * 1.2
+	var v := (14.0 + stat("shd") * 4.5 + (int(s.level) - 1) * 1.2) * (1.0 + gear("shadow"))
 	if buffs.has("mutant"):
 		v *= 1.4
 	if starving():
@@ -151,19 +192,19 @@ func shadow_damage() -> float:
 	return v
 
 func cooldown_mult() -> float:
-	var v := 1.0 / (1.0 + stat("shd") * 0.03)
+	var v := 1.0 / (1.0 + stat("shd") * 0.03 + gear("cdr"))
 	if buffs.has("mutant"):
 		v *= 0.75
 	return v
 
 func dodge_chance() -> float:
-	return minf(0.3, stat("agi") * 0.008)
+	return minf(0.4, stat("agi") * 0.008 + gear("dodge"))
 
 func crit_chance() -> float:
-	return 0.05 + stat("agi") * 0.005 + (0.1 if has_skill("predator_sense") else 0.0)
+	return 0.05 + stat("agi") * 0.005 + (0.1 if has_skill("predator_sense") else 0.0) + gear("crit")
 
 func armor() -> float:
-	var v := minf(0.4, stat("end") * 0.012)
+	var v := minf(0.4, stat("end") * 0.012) + gear("armor")
 	if buffs.has("karkosa"):
 		v += 0.25
 	return minf(v, 0.6)
@@ -379,6 +420,8 @@ func register_kill(kind: String, xp: int) -> void:
 		daily_progress("kill_karkosa")
 	if kind == "cadet":
 		add_suspicion(6.0 * (0.5 if has_skill("night_veil") else 1.0))
+	if kind == "karkosa":
+		side_progress("brann_pest")
 
 func story_step() -> int:
 	return int(s.story)
@@ -468,6 +511,110 @@ func _check_daily_bonus() -> void:
 	s.daily.bonus = true
 	s.skill_points = int(s.skill_points) + 1
 	system_message.emit("Alle täglichen Quests erfüllt!  +1 Skillpunkt", "reward")
+	save_game()
+
+# ---------- Ausrüstung ----------
+
+func add_item(it: Dictionary) -> bool:
+	if (s.bag as Array).size() >= 30:
+		system_message.emit("Tasche voll! Zerlege Gegenstände im System-Menü.", "warn")
+		return false
+	(s.bag as Array).append(it)
+	system_message.emit("%s: %s" % [Items.RARITY[int(it.rarity)].name, it.name], "loot%d" % int(it.rarity))
+	stats_changed.emit()
+	return true
+
+func equip_item(idx: int) -> void:
+	var bag: Array = s.bag
+	if idx < 0 or idx >= bag.size():
+		return
+	var it: Dictionary = bag[idx]
+	var old: Dictionary = s.equip.get(it.slot, {})
+	var old_max := max_hp()
+	bag.remove_at(idx)
+	if not old.is_empty():
+		bag.insert(idx, old)
+	s.equip[it.slot] = it
+	s.hp = clampf(float(s.hp) + (max_hp() - old_max), 1.0, max_hp())
+	equipment_changed.emit()
+	stats_changed.emit()
+	save_game()
+
+func salvage(idx: int) -> void:
+	var bag: Array = s.bag
+	if idx < 0 or idx >= bag.size():
+		return
+	var it: Dictionary = bag[idx]
+	bag.remove_at(idx)
+	var v := Items.value(it)
+	s.shards = int(s.shards) + v
+	system_message.emit("Zerlegt: %s  (+%d Blutsplitter)" % [it.name, v], "mini")
+	stats_changed.emit()
+
+func add_shards(n: int) -> void:
+	s.shards = int(s.shards) + n
+	stats_changed.emit()
+
+func shop_items() -> Array:
+	var today := Time.get_date_string_from_system() + str(int(s.story) / 3)
+	if s.shop.get("day", "") != today or (s.shop.items as Array).is_empty():
+		var lvl := int(s.level)
+		var items: Array = []
+		items.append(Items.make("weapon", lvl, 1 + int(randf() < 0.35)))
+		items.append(Items.make("armor", lvl, 1 + int(randf() < 0.35)))
+		items.append(Items.make("relic", lvl, 1 + int(randf() < 0.35)))
+		items.append(Items.make(["weapon", "armor", "relic"][randi() % 3], lvl + 1, 2 + int(randf() < 0.15)))
+		s.shop = {"day": today, "items": items}
+	return s.shop.items
+
+func buy(idx: int) -> bool:
+	var items: Array = s.shop.items
+	if idx < 0 or idx >= items.size():
+		return false
+	var it: Dictionary = items[idx]
+	var p := Items.price(it)
+	if int(s.shards) < p:
+		system_message.emit("Nicht genug Blutsplitter.", "warn")
+		return false
+	if not add_item(it):
+		return false
+	s.shards = int(s.shards) - p
+	items.remove_at(idx)
+	save_game()
+	return true
+
+# ---------- Nebenquests ----------
+
+func side_state(id: String) -> String:
+	## "", "active", "ready" (Ziel erreicht), "done"
+	var q: Dictionary = s.side.get(id, {})
+	if q.is_empty():
+		return ""
+	if q.get("done", false):
+		return "done"
+	if int(q.progress) >= int(SIDE[id].goal):
+		return "ready"
+	return "active"
+
+func side_start(id: String) -> void:
+	if not s.side.has(id):
+		s.side[id] = {"progress": 0, "done": false}
+		system_message.emit("Neue Nebenquest: %s" % SIDE[id].title, "quest")
+		quests_changed.emit()
+
+func side_progress(id: String, amount := 1) -> void:
+	if side_state(id) != "active":
+		return
+	s.side[id].progress = min(int(SIDE[id].goal), int(s.side[id].progress) + amount)
+	if int(s.side[id].progress) >= int(SIDE[id].goal):
+		system_message.emit("Nebenquest bereit zur Abgabe: %s (bei %s)" % [SIDE[id].title, SIDE[id].giver], "quest")
+	quests_changed.emit()
+
+func side_finish(id: String) -> void:
+	s.side[id].done = true
+	add_xp(150 + int(s.level) * 20)
+	system_message.emit("Nebenquest abgeschlossen: %s" % SIDE[id].title, "quest")
+	quests_changed.emit()
 	save_game()
 
 # ---------- Spielstand ----------

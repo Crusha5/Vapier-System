@@ -16,6 +16,12 @@ const TYPES := {
 		"xp": 160, "drop": "human", "drop_chance": 1.0, "drops": 2, "aggro": 18.0, "kill": "cadet", "radius": 0.5, "boss": true, "charge": true},
 	"instructor": {"name": "Ausbilder Varek", "hp": 460.0, "speed": 5.3, "dmg": 22.0, "range": 2.4, "windup": 0.45, "cd": 0.85,
 		"xp": 280, "drop": "human", "drop_chance": 1.0, "drops": 3, "aggro": 40.0, "kill": "instructor", "radius": 0.55, "boss": true, "charge": true},
+	"butcher": {"name": "Der Schlächter", "hp": 520.0, "speed": 3.4, "dmg": 26.0, "range": 2.6, "windup": 0.95, "cd": 1.3,
+		"xp": 260, "drop": "mutant", "drop_chance": 1.0, "drops": 3, "aggro": 16.0, "kill": "mutant", "radius": 0.75, "boss": true,
+		"aoe": 3.4, "spit": true, "charge": true, "blood": Color(0.6, 0.2, 0.85)},
+	"brood": {"name": "Die Brutmutter", "hp": 1500.0, "speed": 2.6, "dmg": 30.0, "range": 3.6, "windup": 0.85, "cd": 1.2,
+		"xp": 600, "drop": "karkosa", "drop_chance": 1.0, "drops": 5, "aggro": 22.0, "kill": "karkosa", "radius": 1.5, "boss": true,
+		"aoe": 4.2, "spit": true, "brood": true, "blood": Color(0.95, 0.2, 0.7)},
 	"nest": {"name": "Karkosa-Nest", "hp": 360.0, "speed": 0.0, "dmg": 0.0, "range": 0.0, "windup": 1.0, "cd": 1.0,
 		"xp": 200, "drop": "karkosa", "drop_chance": 1.0, "drops": 3, "aggro": 24.0, "kill": "karkosa", "radius": 1.6, "boss": true},
 }
@@ -66,6 +72,20 @@ func setup(k: String, w: Node, at: Vector3, lvl := 1) -> Enemy:
 	wander_target = at
 	return self
 
+func blood_color() -> Color:
+	if cfg.has("blood"):
+		return cfg.blood
+	match kind:
+		"karkosa":
+			return Color(0.45, 0.9, 0.12)
+		"karkosa_elite":
+			return Color(1.0, 0.5, 0.08)
+		"mutant":
+			return Color(0.6, 0.2, 0.85)
+		"nest":
+			return Color(0.45, 0.9, 0.12)
+	return Color(0.7, 0.02, 0.06)
+
 func is_boss() -> bool:
 	return cfg.get("boss", false)
 
@@ -80,22 +100,41 @@ func _ready() -> void:
 	var sh := CapsuleShape3D.new()
 	sh.radius = float(cfg.radius)
 	sh.height = 1.7 if kind != "nest" else 2.6
+	if kind == "brood":
+		sh.height = 3.2
+	if kind == "butcher":
+		sh.height = 2.6
 	cs.shape = sh
 	cs.position.y = sh.height * 0.5
 	add_child(cs)
 	match kind:
-		"karkosa", "karkosa_elite", "mutant":
+		"karkosa", "karkosa_elite", "brood":
 			model = CreatureModel.new(kind)
+		"butcher":
+			var lk := Looks.mutant()
+			lk.scale = 1.65
+			lk.skin = Color(0.4, 0.3, 0.38)
+			lk.accent = Color(1.0, 0.3, 0.6)
+			lk.arm_l = 1.4
+			var hb := Humanoid.new(lk)
+			hb.lean = 0.45
+			hb.weapon_pose = false
+			model = hb
+		"mutant":
+			var hm := Humanoid.new(Looks.mutant())
+			hm.lean = 0.55
+			hm.weapon_pose = false
+			model = hm
 		"cadet":
-			var h := Humanoid.new({"suit": Color(0.78, 0.8, 0.86), "accent": Color(0.25, 0.55, 1.0), "hair": [Color(0.5, 0.32, 0.18), Color(0.85, 0.7, 0.4), Color(0.1, 0.08, 0.08)][randi() % 3]})
+			var h := Humanoid.new(Looks.cadet())
 			model = h
 			h.ready.connect(func(): h.add_blade(Color(0.3, 0.7, 1.0), 0.7))
 		"drax":
-			var h := Humanoid.new({"suit": Color(0.9, 0.9, 0.95), "accent": Color(1.0, 0.7, 0.15), "hair": Color(0.95, 0.85, 0.5), "scale": 1.12, "bulk": 1.15, "cape": true})
+			var h := Humanoid.new(Looks.drax())
 			model = h
 			h.ready.connect(func(): h.add_blade(Color(1.0, 0.75, 0.2), 1.05))
 		"instructor":
-			var h := Humanoid.new({"suit": Color(0.1, 0.1, 0.12), "accent": Color(1.0, 0.82, 0.3), "hair": Color(0.6, 0.6, 0.62), "scale": 1.22, "bulk": 1.25, "cape": true, "visor": true})
+			var h := Humanoid.new(Looks.instructor())
 			model = h
 			h.ready.connect(func(): h.add_blade(Color(1.0, 0.85, 0.35), 1.2))
 		"nest":
@@ -188,6 +227,18 @@ func _physics_process(delta: float) -> void:
 		_nest_logic(delta)
 		_anim(delta, 0.0)
 		return
+	if cfg.get("brood", false) and aggro:
+		_nest_spawn_t -= delta
+		_nest_children = _nest_children.filter(func(e): return is_instance_valid(e) and (e as Enemy).state != "dead")
+		if _nest_spawn_t <= 0.0 and _nest_children.size() < 4:
+			_nest_spawn_t = 7.0 if hp > max_hp * 0.5 else 4.5
+			for i in 2:
+				var a := randf() * TAU
+				var e: Enemy = world.spawn_enemy("karkosa" if randf() < 0.75 else "karkosa_elite", global_position + Vector3(cos(a), 0, sin(a)) * 3.2)
+				if e:
+					e.aggro = true
+					_nest_children.append(e)
+					world.burst(e.global_position + Vector3(0, 0.6, 0), Color(1.0, 0.3, 0.7), 1.2)
 	state_t += delta
 	cd -= delta
 	spit_cd -= delta
@@ -241,7 +292,7 @@ func _physics_process(delta: float) -> void:
 			var wt := float(cfg.windup) * (0.85 if _attack_kind == "spit" else 1.0)
 			var k: float = clamp(state_t / wt, 0.0, 1.0)
 			telegraph.visible = _attack_kind == "melee"
-			var r := float(cfg.range) * 2.0 * (0.4 + 0.6 * k)
+			var r := (float(cfg.aoe) if cfg.has("aoe") else float(cfg.range)) * 2.0 * (0.4 + 0.6 * k)
 			telegraph.scale = Vector3(r, r, 1)
 			Toon.set_alpha(telegraph, 0.35 + 0.65 * k)
 			if state_t >= wt:
@@ -292,7 +343,7 @@ func _begin_windup(kindx: String, mult := 1.0) -> void:
 func time_to_hit(player_pos: Vector3) -> float:
 	if state != "windup" or _attack_kind != "melee":
 		return -1.0
-	if global_position.distance_to(player_pos) > float(cfg.range) + 1.6:
+	if global_position.distance_to(player_pos) > (float(cfg.aoe) if cfg.has("aoe") else float(cfg.range)) + 1.6:
 		return -1.0
 	return float(cfg.windup) - state_t
 
@@ -303,7 +354,15 @@ func _do_attack() -> void:
 	if _attack_kind == "spit":
 		spit_cd = 3.6
 		_play("attack")
-		world.spawn_spit(global_position + Vector3(0, 1.4, 0) - global_basis.z * 0.6, world.player.global_position + Vector3(0, 0.9, 0), float(cfg.dmg) * 0.6 * level_mult)
+		var origin := global_position + Vector3(0, 1.4 if not is_boss() else 2.2, 0) - global_basis.z * (0.6 + float(cfg.radius))
+		var target: Vector3 = world.player.global_position + Vector3(0, 0.9, 0)
+		var shots := 1 if not is_boss() else (3 if kind == "butcher" else 5)
+		for i in shots:
+			var spread := (i - (shots - 1) * 0.5) * 0.28
+			var dir := (target - origin)
+			dir.y = 0
+			dir = dir.rotated(Vector3.UP, spread)
+			world.spawn_spit(origin, origin + dir, float(cfg.dmg) * (0.6 if not is_boss() else 0.35) * level_mult)
 		return
 	_play("attack")
 	if model is Humanoid:
@@ -312,7 +371,11 @@ func _do_attack() -> void:
 	var to_p := p.global_position - global_position
 	to_p.y = 0.0
 	var fwd := -global_basis.z
-	if to_p.length() <= float(cfg.range) + 0.45 and (to_p.length() < 0.8 or fwd.dot(to_p.normalized()) > 0.25):
+	if cfg.has("aoe"):
+		world.shockwave(global_position, float(cfg.aoe), blood_color())
+		if to_p.length() <= float(cfg.aoe):
+			world.player.receive_hit(float(cfg.dmg) * level_mult, global_position)
+	elif to_p.length() <= float(cfg.range) + 0.45 and (to_p.length() < 0.8 or fwd.dot(to_p.normalized()) > 0.25):
 		world.player.receive_hit(float(cfg.dmg) * level_mult, global_position)
 	world.sfx("swing")
 
@@ -352,7 +415,12 @@ func take_hit(amount: float, from: Vector3, knockback := 4.0, crit := false, col
 	flash = 1.0
 	last_hit_t = 0.0
 	aggro = true
-	world.damage_number(global_position + Vector3(0, 2.0 if kind != "nest" else 3.2, 0), amount, color, crit)
+	var nh := 2.0
+	if kind == "nest" or kind == "butcher":
+		nh = 3.2
+	elif kind == "brood":
+		nh = 3.8
+	world.damage_number(global_position + Vector3(0, nh, 0), amount, color, crit)
 	if kind != "nest":
 		var d := global_position - from
 		d.y = 0
@@ -386,6 +454,7 @@ func _die() -> void:
 			var off := Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.8, 0.8)) if n > 1 else Vector3.ZERO
 			world.spawn_capsule(String(cfg.drop), global_position + off)
 	PlayerStats.register_kill(String(cfg.kill), int(float(cfg.xp) * level_mult))
+	world.roll_loot(self)
 	died.emit(self)
 
 # ---------- Nest ----------

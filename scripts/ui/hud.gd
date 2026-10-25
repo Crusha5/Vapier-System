@@ -38,6 +38,7 @@ var banner_t := 0.0
 var zone_name := ""
 var zone_t := 0.0
 var perfect_t := 0.0
+var fade_t := 9.0
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -59,7 +60,7 @@ func _on_msg(text: String, kind: String) -> void:
 		msgs.pop_front()
 	if kind == "level":
 		world.sfx("level")
-	elif kind in ["quest", "reward"]:
+	elif kind in ["quest", "reward", "loot2", "loot3"]:
 		world.sfx("quest")
 	elif kind == "warn":
 		world.sfx("warn")
@@ -250,6 +251,7 @@ func _process(delta: float) -> void:
 	banner_t += rd
 	zone_t += rd
 	perfect_t -= rd
+	fade_t += rd
 	if death_t >= 0.0:
 		death_t += rd
 	if _attack_idx >= 0 and world and not world.menu_open():
@@ -298,9 +300,14 @@ func _draw() -> void:
 		_draw_quest()
 		_draw_controls()
 		_draw_boss()
+	if not title_mode:
+		_draw_combo()
 	_draw_msgs()
 	_draw_banner()
 	_draw_narration()
+	if fade_t < 1.0:
+		var fa := sin(clampf(fade_t, 0.0, 1.0) * PI)
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, fa))
 	if death_t >= 0.0:
 		var a := clampf(death_t * 1.2, 0.0, 0.85)
 		draw_rect(Rect2(Vector2.ZERO, size), Color(0.12, 0.0, 0.02, a))
@@ -409,6 +416,29 @@ func _draw_stats() -> void:
 		var a := clampf(2.2 - float(m.t), 0.0, 1.0)
 		_str(Vector2(x0, my), m.text, 12, Color(H.FG, a * 0.9), H.F_SEMI)
 		my += 16
+
+func _draw_combo() -> void:
+	var p: Player = world.player
+	if p == null or p.hit_streak < 3:
+		return
+	var n := p.hit_streak
+	var col := H.FG
+	if n >= 30:
+		col = H.GOLD
+	elif n >= 15:
+		col = H.RED
+	elif n >= 8:
+		col = H.CYAN
+	var a := clampf(p.streak_t / 0.6, 0.0, 1.0)
+	var x := size.x - 300.0
+	var y := 182.0
+	var pulse := 1.0 + maxf(0.0, p.streak_t - 2.3) * 0.6
+	_str_outline(Vector2(x, y), str(n), int(34 * pulse), Color(col, a), H.F_BOLD, HORIZONTAL_ALIGNMENT_RIGHT, 110)
+	_str_outline(Vector2(x + 116, y - 4), "TREFFER", 13, Color(col, a * 0.9), H.F_SEMI)
+	if PlayerStats.buffs.has("frenzy"):
+		_str_outline(Vector2(x + 116, y + 12), "BLUTRAUSCH", 11, Color(H.RED, a * (0.7 + 0.3 * sin(_t * 10.0))), H.F_SEMI)
+	draw_rect(Rect2(x + 30, y + 8, 80, 3), Color(1, 1, 1, 0.1 * a))
+	draw_rect(Rect2(x + 30, y + 8, 80 * clampf(p.streak_t / 2.6, 0.0, 1.0), 3), Color(col, a))
 
 func _draw_drop(c: Vector2, r: float, col: Color) -> void:
 	draw_colored_polygon(_drop_points(c, r), col)
@@ -582,6 +612,8 @@ func _draw_boss() -> void:
 	_bar(r, boss.hp / boss.max_hp, Color(1.0, 0.25, 0.25), Color(0.3, 0.05, 0.05, 0.6), 10)
 
 func _msg_color(kind: String) -> Color:
+	if kind.begins_with("loot"):
+		return Items.RARITY[int(kind.substr(4))].color
 	match kind:
 		"blood":
 			return H.RED
@@ -624,6 +656,8 @@ func _draw_msgs() -> void:
 				head = "[ BELOHNUNG ]"
 			"level":
 				head = "[ EVOLUTION ]"
+			"loot0", "loot1", "loot2", "loot3":
+				head = "[ BEUTE ]"
 		_str(r.position + Vector2(10, 15), head, 10, Color(col, a), H.F_SEMI)
 		_str(r.position + Vector2(10, 32 if not big else 38), _clip(m.text, 13 if not big else 16, w - 20), 13 if not big else 16, Color(H.FG, a), H.F_BOLD if big else H.F_SEMI)
 		y += h + 5
