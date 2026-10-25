@@ -1,0 +1,63 @@
+name: Android-APK bauen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: 4.7.2
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Godot und Export-Vorlagen laden
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          mkdir -p ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          unzip -qj Godot_v${GODOT_VERSION}-stable_export_templates.tpz templates/android_release.apk templates/android_debug.apk templates/version.txt -d ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          rm -f *.tpz *.zip
+
+      - name: Signierschlüssel vorbereiten
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+            echo "KS_PASS=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+          else
+            echo "Kein Secret KEYSTORE_BASE64 gesetzt – erzeuge Wegwerf-Schlüssel (vor Update alte App deinstallieren)."
+            keytool -genkeypair -keystore release.keystore -storepass sanguine -alias sanguine -keypass sanguine \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Sanguine Protocol,O=Sanguine Protocol,C=DE"
+            echo "KS_PASS=sanguine" >> $GITHUB_ENV
+          fi
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\n' "$ANDROID_HOME" "$JAVA_HOME" > ~/.config/godot/editor_settings-4.7.tres
+
+      - name: Projekt importieren und APK exportieren
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/release.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: sanguine
+        run: |
+          export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="$KS_PASS"
+          mkdir -p build
+          ./godot --headless --import || true
+          ./godot --headless --export-release Android build/sanguine-protocol.apk
+          ls -la build
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: sanguine-protocol-apk
+          path: build/sanguine-protocol.apk
+          retention-days: 30
