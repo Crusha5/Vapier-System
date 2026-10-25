@@ -6,8 +6,8 @@ uniform vec4 outline_color : source_color = vec4(0.015, 0.012, 0.03, 1.0);
 uniform float thickness = 0.035;
 uniform float radial = 0.0; // 1 = vom Objektmittelpunkt weg (für kantige Kästen ohne Lücken)
 uniform bool fade_occluder = false;
-global uniform vec3 player_pos;
-global uniform vec3 cam_pos;
+uniform vec3 player_pos = vec3(0.0);
+uniform vec3 cam_pos = vec3(0.0, 10.0, 10.0);
 varying vec3 wpos;
 
 void vertex() {

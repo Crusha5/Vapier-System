@@ -171,7 +171,7 @@ func _physics_process(delta: float) -> void:
 	last_hit_t += delta
 	if flash > 0.0:
 		flash = max(0.0, flash - delta * 5.0)
-		Toon.set_param(model, "flash", flash)
+		Toon.set_overlay(model, Color(1, 0.95, 0.95), flash)
 	if state == "dead":
 		state_t += delta
 		_anim(delta, 0.0)
@@ -180,10 +180,10 @@ func _physics_process(delta: float) -> void:
 		return
 	if frozen():
 		telegraph.visible = false
-		Toon.set_param(model, "tint", Color(0.55, 0.6, 1.0))
+		Toon.set_overlay(model, Color(0.25, 0.35, 1.0), 0.45)
 		return
-	elif spawn_t > 0.1:
-		Toon.set_param(model, "tint", Color(1, 1, 1))
+	elif flash <= 0.0:
+		Toon.set_overlay(model, Color(1, 1, 1), 0.0)
 	if kind == "nest":
 		_nest_logic(delta)
 		_anim(delta, 0.0)
@@ -243,7 +243,7 @@ func _physics_process(delta: float) -> void:
 			telegraph.visible = _attack_kind == "melee"
 			var r := float(cfg.range) * 2.0 * (0.4 + 0.6 * k)
 			telegraph.scale = Vector3(r, r, 1)
-			Toon.set_param(telegraph, "alpha", 0.35 + 0.65 * k)
+			Toon.set_alpha(telegraph, 0.35 + 0.65 * k)
 			if state_t >= wt:
 				_do_attack()
 		"attack":

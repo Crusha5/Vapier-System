@@ -310,7 +310,7 @@ func _build_vault() -> void:
 	_wall_x(-24, -14, 5, [], m_wall_dark, LOW_H)
 	_wall_z(-5, 5, -24, [], m_wall_dark)
 	vault_glyph = Toon.quad_holo(self, Vector2(3.4, 3.4), VAULT_SIGIL + Vector3(0, 0.04, 0), Toon.holo(Color(0.75, 0.1, 0.25), 1.2, true, 0.0))
-	Toon.set_param(vault_glyph, "alpha", 0.08)
+	Toon.set_alpha(vault_glyph, 0.08)
 	# Sarkophag des ersten Wirts
 	Toon.box(self, Vector3(1.2, 0.8, 2.4), Vector3(-22.6, 0.4, 0), Toon.mat(Color(0.25, 0.24, 0.3), {"outline": 0.04, "radial": 1.0, "fade": true}))
 	Toon.box(self, Vector3(0.08, 0.04, 2.0), Vector3(-22.6, 0.82, 0), m_neon_r)
@@ -460,5 +460,5 @@ func _process(delta: float) -> void:
 		env.ambient_light_energy = move_toward(env.ambient_light_energy, amb, delta * 0.1)
 	var midnight := h == 0
 	var ga := (0.6 + sin(_t * 4.0) * 0.3) if midnight else (0.08 + (0.07 * maxf(0.0, sin(_t * 2.0)) if PlayerStats.has_skill("predator_sense") else 0.0))
-	Toon.set_param(vault_glyph, "alpha", ga)
+	Toon.set_alpha(vault_glyph, ga)
 	vault_light.light_energy = 2.2 if midnight else 0.3

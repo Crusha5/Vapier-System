@@ -8,7 +8,7 @@ uniform float scan = 0.25;
 uniform float ring_mode = 0.0;  // 1 = Ringe/Runen auf einer Scheibe (UV-Mitte)
 uniform float speed = 1.0;
 uniform float ribbon = 0.0;   // 1 = Schweif (UV.x = Verlauf, UV.y = quer)
-instance uniform float alpha = 1.0;
+uniform float alpha = 1.0;
 
 void fragment() {
 	float a = 1.0;

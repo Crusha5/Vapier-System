@@ -64,7 +64,8 @@ func _chime(t: float, notes: Array, step: float) -> float:
 func _make(dur: float, f: Callable, smooth: float) -> AudioStreamWAV:
 	var n := int(dur * RATE)
 	var data := PackedByteArray()
-	data.resize(n * 2)
+	data.resize((n + 256) * 2)  # Stille am Ende als Sicherheitsabstand
+	data.fill(0)
 	var prev := 0.0
 	for i in n:
 		var t := float(i) / RATE
@@ -99,7 +100,7 @@ func _drone() -> AudioStreamWAV:
 	w.data = data
 	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
 	w.loop_begin = 0
-	w.loop_end = n
+	w.loop_end = n - 4
 	return w
 
 func play(name: String, vol_db := 0.0, pitch_var := 0.08) -> void:

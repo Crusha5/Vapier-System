@@ -3,9 +3,8 @@ extends RefCounted
 ## Materialien (Cel-Shading + Kontur) und kleine Geometrie-Bausteine.
 
 const TOON := preload("res://shaders/toon.gdshader")
-const TOON_ACTOR := preload("res://shaders/toon_actor.gdshader")
 const OUTLINE := preload("res://shaders/outline.gdshader")
-const OUTLINE_ACTOR := preload("res://shaders/outline_actor.gdshader")
+const OVERLAY := preload("res://shaders/overlay.gdshader")
 const HOLO := preload("res://shaders/holo.gdshader")
 
 # Palette (abgeleitet vom App-Icon: Neon-Rot, Cyan, dunkles Mauerwerk)
@@ -19,14 +18,14 @@ const CHITIN := Color(0.16, 0.32, 0.3)
 const INK := Color(0.015, 0.012, 0.03)
 
 static var _cache := {}
+static var fade_mats: Array[ShaderMaterial] = []
 
 static func mat(color: Color, opts := {}) -> ShaderMaterial:
 	var key := str(color) + str(opts)
 	if _cache.has(key):
 		return _cache[key]
-	var actor: bool = opts.get("actor", false)
 	var m := ShaderMaterial.new()
-	m.shader = TOON_ACTOR if actor else TOON
+	m.shader = TOON
 	m.set_shader_parameter("albedo", color)
 	if opts.has("emit"):
 		m.set_shader_parameter("emission", opts.emit)
@@ -43,22 +42,28 @@ static func mat(color: Color, opts := {}) -> ShaderMaterial:
 		m.set_shader_parameter("grime", opts.grime)
 	if opts.get("fade", false):
 		m.set_shader_parameter("fade_occluder", true)
+		fade_mats.append(m)
 	if opts.get("outline", 0.0) > 0.0:
 		var o := ShaderMaterial.new()
-		o.shader = OUTLINE_ACTOR if actor else OUTLINE
+		o.shader = OUTLINE
 		o.set_shader_parameter("thickness", opts.outline)
 		o.set_shader_parameter("radial", opts.get("radial", 0.0))
-		if opts.get("fade", false) and not actor:
+		if opts.get("fade", false):
 			o.set_shader_parameter("fade_occluder", true)
+			fade_mats.append(o)
 		m.next_pass = o
 	_cache[key] = m
 	return m
 
-## Material für Figuren (Treffer-Blitz/Färbung pro Instanz)
+## Material für Figuren (Treffer-Blitz läuft über set_overlay)
 static func amat(color: Color, opts := {}) -> ShaderMaterial:
-	var o := opts.duplicate()
-	o["actor"] = true
-	return mat(color, o)
+	return mat(color, opts)
+
+## Spieler-/Kameraposition für das Ausblenden verdeckender Wände
+static func update_fade(player_pos: Vector3, cam_pos: Vector3) -> void:
+	for m in fade_mats:
+		m.set_shader_parameter("player_pos", player_pos)
+		m.set_shader_parameter("cam_pos", cam_pos)
 
 static func holo(color: Color, energy := 1.6, rings := false, scan := 0.25) -> ShaderMaterial:
 	var key := "holo" + str(color) + str(energy) + str(rings) + str(scan)
@@ -139,9 +144,37 @@ static func solid(parent: Node, size: Vector3, pos: Vector3, mt: Material, rot_y
 	collider(parent, size, pos, rot_y)
 	return mi
 
-## Rekursiv instance-Parameter setzen (Treffer-Blitz, Färbung)
-static func set_param(n: Node, param: String, v: Variant) -> void:
+## Transparenz eines Hologramm-Effekts (Material wird dafür einmal kopiert)
+static func set_alpha(n: Node, v: float) -> void:
 	if n is GeometryInstance3D:
-		(n as GeometryInstance3D).set_instance_shader_parameter(param, v)
+		var gi := n as GeometryInstance3D
+		if gi.material_override is ShaderMaterial:
+			if not gi.has_meta("uniq"):
+				gi.material_override = gi.material_override.duplicate()
+				gi.set_meta("uniq", true)
+			(gi.material_override as ShaderMaterial).set_shader_parameter("alpha", v)
 	for c in n.get_children():
-		set_param(c, param, v)
+		set_alpha(c, v)
+
+## Treffer-Blitz / Färbung einer Figur über material_overlay (amount 0 = aus)
+static func set_overlay(model: Node, color: Color, amount: float) -> void:
+	var on := amount > 0.01
+	var was: bool = model.get_meta("ovl_on", false)
+	if not on and not was:
+		return
+	var m: ShaderMaterial = model.get_meta("ovl") if model.has_meta("ovl") else null
+	if m == null:
+		m = ShaderMaterial.new()
+		m.shader = OVERLAY
+		model.set_meta("ovl", m)
+	m.set_shader_parameter("color", color)
+	m.set_shader_parameter("amount", amount)
+	if on != was:
+		model.set_meta("ovl_on", on)
+		_apply_overlay(model, m if on else null)
+
+static func _apply_overlay(n: Node, m: Material) -> void:
+	if n is GeometryInstance3D and not (n is Label3D):
+		(n as GeometryInstance3D).material_overlay = m
+	for c in n.get_children():
+		_apply_overlay(c, m)

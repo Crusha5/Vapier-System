@@ -61,7 +61,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if flash > 0.0:
 		flash = max(0.0, flash - delta * 4.0)
-		Toon.set_param(model, "flash", flash)
+		Toon.set_overlay(model, Color(1.0, 0.25, 0.3), flash)
 	combo_timer -= delta
 	if combo_timer <= 0.0:
 		combo = 0

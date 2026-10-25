@@ -145,7 +145,7 @@ func _build_title() -> void:
 	var b2 := H.btn("Neues Spiel", func(): _confirm_new(has_save), "" if has_save else "BtnRed")
 	b2.custom_minimum_size = Vector2(260, 44)
 	v.add_child(b2)
-	v.add_child(H.lbl("v0.1.1 · Prototyp", 10, Color(H.MUTED, 0.6), H.F_MONO))
+	v.add_child(H.lbl("v0.1.2 · Prototyp", 10, Color(H.MUTED, 0.6), H.F_MONO))
 	if not _prev_session.is_empty() and not _prev_session.get("clean", true):
 		var info := H.wrap("Letzte Sitzung wurde unerwartet beendet nach %d s (%s, Story %d)." % [int(_prev_session.get("uptime", 0)), _prev_session.get("state", "?"), int(_prev_session.get("story", 0))], 11, H.RED)
 		info.custom_minimum_size = Vector2(260, 0)
@@ -497,8 +497,7 @@ func _process(delta: float) -> void:
 		camera.look_at(_cam_focus, Vector3.UP)
 	else:
 		_update_camera(delta, rd)
-	RenderingServer.global_shader_parameter_set("player_pos", player.global_position)
-	RenderingServer.global_shader_parameter_set("cam_pos", camera.global_position)
+	Toon.update_fade(player.global_position, camera.global_position)
 	if state == "title":
 		return
 	_update_interact()
@@ -849,14 +848,14 @@ func _update_fx(delta: float, rd: float) -> void:
 				(n as Node3D).position += (f.v as Vector3) * rd * (1.0 - k)
 				(n as Label3D).modulate.a = clampf(1.6 - k * 1.6, 0.0, 1.0)
 			"fade":
-				Toon.set_param(n, "alpha", 1.0 - k)
+				Toon.set_alpha(n, 1.0 - k)
 				if f.has("spin"):
 					(n as Node3D).rotation.y += float(f.spin) * delta * (1.0 - k)
 			"grow":
 				var s: float = lerpf(0.4, float(f.to), 1.0 - pow(1.0 - k, 3.0))
 				(n as Node3D).scale = Vector3(s, 1, s)
 				(n as Node3D).rotation.y += float(f.spin) * delta
-				Toon.set_param(n, "alpha", 1.0 - k * k)
+				Toon.set_alpha(n, 1.0 - k * k)
 			"echo":
 				if k >= 1.0:
 					var pos: Vector3 = f.pos
