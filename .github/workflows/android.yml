@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -61,3 +64,11 @@ jobs:
           name: sanguine-protocol-apk
           path: build/sanguine-protocol.apk
           retention-days: 30
+
+      - name: APK als Release „latest“ veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest build/sanguine-protocol.apk --title "Neueste APK" \
+            --notes "Automatisch gebaut aus ${GITHUB_SHA::7}. Direkt-Link: https://github.com/${{ github.repository }}/releases/latest/download/sanguine-protocol.apk" --latest

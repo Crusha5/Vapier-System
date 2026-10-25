@@ -19,8 +19,9 @@ Jahr 2185, Vanguard-Akademie: Du bist **Kadett-Subjekt 0** – ohne Gen-Anpassun
 
 ## APK bekommen
 
-Bei jedem Push auf `main` baut GitHub Actions automatisch eine APK:
-**Actions → „Android-APK bauen“ → letzter Lauf → Artifacts → sanguine-protocol-apk**
+Bei jedem Push auf `main` baut GitHub Actions automatisch eine APK und stellt sie als Release bereit:
+**https://github.com/Crusha5/Vapier-System/releases/latest/download/sanguine-protocol.apk**
+(zusätzlich unter Actions → „Android-APK bauen“ → Artifacts)
 
 Damit Updates ohne Neuinstallation klappen, braucht das Repo zwei Secrets mit einem festen Signierschlüssel:
 `KEYSTORE_BASE64` (Keystore als Base64, Alias `sanguine`) und `KEYSTORE_PASSWORD`.
