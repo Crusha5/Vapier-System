@@ -40,6 +40,10 @@ var _ring_mesh: ArrayMesh
 var _ribbon_red: ShaderMaterial
 var _ribbon_dark: ShaderMaterial
 var autotest := false
+const SESSION_PATH := "user://session.json"
+var _session_t := 0.0
+var _session_last := 0.0
+var _prev_session := {}
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -84,6 +88,8 @@ func _ready() -> void:
 	PlayerStats.leveled_up.connect(func(_l):
 		burst(player.global_position + Vector3(0, 1.0, 0), H.GOLD, 2.0)
 		hud.show_banner("STUFE %d" % _l))
+	_prev_session = _read_session()
+	_write_session(false)
 	if autotest:
 		state = "play"
 		hud.title_mode = false
@@ -102,7 +108,7 @@ func _build_title() -> void:
 	title.process_mode = Node.PROCESS_MODE_ALWAYS
 	hud.get_parent().add_child(title)
 	var bg := ColorRect.new()
-	bg.color = Color(0.0, 0.0, 0.02, 0.45)
+	bg.color = Color(0.0, 0.0, 0.02, 0.62)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title.add_child(bg)
@@ -113,23 +119,23 @@ func _build_title() -> void:
 	title.add_child(box)
 	var icon := TextureRect.new()
 	icon.texture = load("res://icon.png")
-	icon.custom_minimum_size = Vector2(220, 220)
+	icon.custom_minimum_size = Vector2(190, 190)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	box.add_child(icon)
-	var v := H.vbox(8)
+	var v := H.vbox(5)
 	v.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	box.add_child(v)
 	v.add_child(H.caps("Vanguard-Akademie · Jahr 2185", H.CYAN, 12))
-	var t1 := H.lbl("SANGUINE", 46, H.FG, H.F_BOLD)
+	var t1 := H.lbl("SANGUINE", 38, H.FG, H.F_BOLD)
 	t1.add_theme_color_override("font_outline_color", Color(0.4, 0.0, 0.05))
 	t1.add_theme_constant_override("outline_size", 8)
 	v.add_child(t1)
-	var t2 := H.lbl("PROTOCOL", 46, H.RED, H.F_BOLD)
+	var t2 := H.lbl("PROTOCOL", 38, H.RED, H.F_BOLD)
 	v.add_child(t2)
 	v.add_child(H.lbl("Kapitel 1 · Erwachen", 15, H.MUTED, H.F_SEMI))
 	var sp := Control.new()
-	sp.custom_minimum_size = Vector2(0, 8)
+	sp.custom_minimum_size = Vector2(0, 4)
 	v.add_child(sp)
 	var has_save: bool = PlayerStats.s.awakened or int(PlayerStats.s.story) > 0
 	if has_save:
@@ -139,7 +145,14 @@ func _build_title() -> void:
 	var b2 := H.btn("Neues Spiel", func(): _confirm_new(has_save), "" if has_save else "BtnRed")
 	b2.custom_minimum_size = Vector2(260, 44)
 	v.add_child(b2)
-	v.add_child(H.lbl("v0.1 · Prototyp", 10, Color(H.MUTED, 0.6), H.F_MONO))
+	v.add_child(H.lbl("v0.1.1 · Prototyp", 10, Color(H.MUTED, 0.6), H.F_MONO))
+	if not _prev_session.is_empty() and not _prev_session.get("clean", true):
+		var info := H.wrap("Letzte Sitzung wurde unerwartet beendet nach %d s (%s, Story %d)." % [int(_prev_session.get("uptime", 0)), _prev_session.get("state", "?"), int(_prev_session.get("story", 0))], 11, H.RED)
+		info.custom_minimum_size = Vector2(260, 0)
+		v.add_child(info)
+		var rb := H.btn("Fehlerbericht kopieren", func(): _copy_report(), "BtnRed")
+		rb.custom_minimum_size = Vector2(260, 36)
+		v.add_child(rb)
 
 var _new_armed := false
 func _confirm_new(has_save: bool) -> void:
@@ -405,7 +418,52 @@ func toggle_menu() -> void:
 		get_tree().paused = true
 	sfx("tick")
 
+# ---------- Sitzungsprotokoll (für Absturzberichte) ----------
+
+func _read_session() -> Dictionary:
+	if not FileAccess.file_exists(SESSION_PATH):
+		return {}
+	var f := FileAccess.open(SESSION_PATH, FileAccess.READ)
+	if f == null:
+		return {}
+	var d = JSON.parse_string(f.get_as_text())
+	return d if typeof(d) == TYPE_DICTIONARY else {}
+
+func _write_session(clean: bool) -> void:
+	var f := FileAccess.open(SESSION_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify({
+		"clean": clean, "uptime": _session_t, "state": state, "story": int(PlayerStats.s.get("story", 0)),
+		"fps": Engine.get_frames_per_second(), "nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+		"mem_mb": snappedf(OS.get_static_memory_usage() / 1048576.0, 0.1),
+		"enemies": get_tree().get_nodes_in_group("enemies").size() if is_inside_tree() else 0,
+		"renderer": RenderingServer.get_current_rendering_method(), "gpu": RenderingServer.get_video_adapter_name(),
+		"device": OS.get_model_name(), "os": OS.get_name() + " " + OS.get_version(),
+	}))
+
+func _copy_report() -> void:
+	var txt := "Sanguine Protocol – Fehlerbericht\n" + JSON.stringify(_prev_session, "  ") + "\n\n"
+	# vorheriges Godot-Log (das neueste außer dem aktuellen)
+	var logs := DirAccess.get_files_at("user://logs")
+	var files: Array = []
+	for fn in logs:
+		if fn.ends_with(".log") and fn != "godot.log":
+			files.append(fn)
+	files.sort()
+	if files.size() > 0:
+		var f := FileAccess.open("user://logs/" + String(files[-1]), FileAccess.READ)
+		if f:
+			var lines := f.get_as_text().split("\n")
+			txt += "--- " + String(files[-1]) + " ---\n" + "\n".join(lines.slice(max(0, lines.size() - 60)))
+	DisplayServer.clipboard_set(txt)
+	PlayerStats.system_message.emit("Fehlerbericht kopiert – einfach im Chat einfügen.", "sys")
+
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_write_session(true)
+	elif what == NOTIFICATION_APPLICATION_RESUMED:
+		_write_session(false)
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		if state == "play" or menu.visible:
 			toggle_menu()
@@ -423,6 +481,10 @@ func _process(delta: float) -> void:
 		ts = 0.06
 	Engine.time_scale = ts
 	var rd := delta / maxf(ts, 0.01)
+	_session_t += rd
+	if _session_t - _session_last > 2.0:
+		_session_last = _session_t
+		_write_session(false)
 	if _eclipse_t > 0.0:
 		_eclipse_t -= delta
 	PlayerStats.paused_world = state != "play" or hud.narrating() or player.dead

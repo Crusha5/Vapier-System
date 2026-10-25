@@ -94,7 +94,7 @@ func _ready() -> void:
 	vault_glyph.set_meta("keep", true)
 	var merged := Batcher.merge(self)
 	print("Level: ", merged, " Meshes zusammengefasst → ", get_child_count(), " Knoten")
-	nav.bake_navigation_mesh(true)
+	nav.bake_navigation_mesh(false)
 
 # ---------- Umgebung & Licht ----------
 
@@ -455,7 +455,9 @@ func _process(delta: float) -> void:
 	# Nacht: etwas dunkler, Gewölbe-Glyphe glimmt um Mitternacht
 	var h := PlayerStats.clock_hour()
 	var night := 1.0 if (h >= 22 or h < 5) else 0.0
-	env.ambient_light_energy = lerp(env.ambient_light_energy, 0.62 - night * 0.12, delta)
+	var amb := 0.62 - night * 0.12
+	if absf(env.ambient_light_energy - amb) > 0.01:
+		env.ambient_light_energy = move_toward(env.ambient_light_energy, amb, delta * 0.1)
 	var midnight := h == 0
 	var ga := (0.6 + sin(_t * 4.0) * 0.3) if midnight else (0.08 + (0.07 * maxf(0.0, sin(_t * 2.0)) if PlayerStats.has_skill("predator_sense") else 0.0))
 	Toon.set_param(vault_glyph, "alpha", ga)
