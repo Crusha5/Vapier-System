@@ -36,7 +36,12 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
+          if [ -n "$KEYSTORE_PASSWORD" ] && [ -f release.keystore.enc ]; then
+            # Fester Schlüssel liegt verschlüsselt im Repo, das Passwort ist das Secret KEYSTORE_PASSWORD
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in release.keystore.enc -out release.keystore -pass env:KEYSTORE_PASSWORD
+            echo "KS_PASS=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+            echo "Fester Signierschlüssel aktiv."
+          elif [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
             echo "KS_PASS=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
           else

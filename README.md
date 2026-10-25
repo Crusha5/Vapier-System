@@ -23,9 +23,9 @@ Bei jedem Push auf `main` baut GitHub Actions automatisch eine APK und stellt si
 **https://github.com/Crusha5/Vapier-System/releases/latest/download/sanguine-protocol.apk**
 (zusätzlich unter Actions → „Android-APK bauen“ → Artifacts)
 
-Damit Updates ohne Neuinstallation klappen, braucht das Repo zwei Secrets mit einem festen Signierschlüssel:
-`KEYSTORE_BASE64` (Keystore als Base64, Alias `sanguine`) und `KEYSTORE_PASSWORD`.
-Ohne Secrets wird bei jedem Lauf ein neuer Wegwerf-Schlüssel erzeugt (dann vor dem Update die alte App deinstallieren).
+Signiert wird mit einem festen Schlüssel, der verschlüsselt im Repo liegt (`release.keystore.enc`, Alias `sanguine`).
+Das Passwort steht als Secret `KEYSTORE_PASSWORD` im Repo (Settings → Secrets and variables → Actions).
+Fehlt das Secret, wird ein Wegwerf-Schlüssel erzeugt – dann vor jedem Update die alte App deinstallieren.
 
 ## Steuerung
 
