@@ -1,69 +1,25 @@
 # Sanguine Protocol
 
-3D-Action-RPG / LitRPG für Android, gebaut mit Godot 4.7 (Mobile-Renderer), Cel-Shading im Comic-Look.
+Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisiert. Kamera von hinten oder Ego-Perspektive, jederzeit umschaltbar.
 
-Jahr 2185, Vanguard-Akademie: Du bist **Kadett-Subjekt 0** – ohne Gen-Anpassungen, gemobbt, kurz vor dem Rauswurf. In den Ruinen des alten Archivs erweckt dein Blut das verbotene **Sanguine-Protokoll**: ein holografisches RPG-System mit unbegrenztem Potenzial – und einer tödlichen Bedingung: **Deine Lebensenergie zehrt von Blut.**
+**Veyra** – eine Kolonie, seit zwölf Jahren vom **Schleier** (einem roten Sturm) von der Erde abgeschnitten. Soldat **Kael** hat sich geweigert, das Dorf Morrow niederzubrennen. Kommandant Varek hat ihn erschossen und in den Ruinen der Alten liegen lassen. Dort erweckt ihn **die Erste Nacht** – als Blutgeborenen, mit einem Protokoll im Kopf.
 
-## Was schon drin ist
+## v0.3 – Offene Welt, Akt 1 „Die Erste Nacht“
 
-**v0.2 – Kapitel 2 „Knochen und Erinnerung“**
-- **Neue Figuren:** durchgehende, geskinnte Körper mit Skelett (keine Kästen mehr) – Anime-Frisuren, Mäntel, Umhänge, Stiefel, leuchtende Akzente. Karkosa aus glatten, gerippten Chitin-Formen mit Sichelarmen.
-- **Kampf-Gefühl:** Klingenspur, Blutspritzer und Blutlachen je Gegnerart (rot, grün, violett), Kamera-Kick, Trefferpause, Kombo-Zähler mit **Blutrausch** ab 15 Treffern.
-- **Ausrüstung & Beute:** Waffen (Blutklinge, Schattensense, Zwillingsdolche – jede spielt sich anders), Uniformen, Relikte. Vier Seltenheiten mit zufälligen Eigenschaften, Lichtsäulen am Boden, Ausrüsten/Zerlegen, Blutsplitter als Währung, Laden beim Quartiermeister.
-- **Größere Welt:** Innenhof der Gründer, Schlafsaal, Mensa, alter Aufzug und Katakomben (Gruft, Ossarium, Brutkammer).
-- **Kapitel 2:** Mira, Brann, der Schlächter (Flächenangriffe), Erinnerungsfragmente des ersten Wirts, Boss **Brutmutter**. Drei Nebenquests.
+- **Offene Welt:** 560 × 560 m Gelände mit Fluss, See, Wäldern, Wegen. Ruinen der Alten, Dorf Asch-Furt, Krähes Banditenlager, Wachturm, Schrein, Landerwrack, Obelisken mit Lore.
+- **Tag und Nacht in Echtzeit** (1 Spielminute pro Sekunde), Regen, Himmel mit Monden und Schleier.
+- **Menschlichkeit 0–100:** bestimmt Aussehen, Sonnenschaden, Nachtkraft und wie Menschen auf dich reagieren.
+- **Trinken mit Folgen:** nippen (Opfer überlebt, erinnert sich vielleicht an dich) oder aussaugen (Opfer stirbt). Am besten von hinten oder im Schlaf. Zeugen machen dich im Dorf zum Ausgestoßenen.
+- **Blutsinn:** Herzschläge durch Wände sehen.
+- **Sonne brennt:** Schatten, Wald und Häuser schützen.
+- **Dorfleben:** Bewohner arbeiten, sitzen abends am Feuer und schlafen nachts in ihren Betten.
+- **Akt 1:** Tamas am Weg → Asch-Furt → Jory im Käfig (die Wacht hängt ihn bei Sonnenaufgang) → Krähe → Finale an der Ruine. Jede Wahl ist endgültig und steht in der Chronik.
+- **Ein einziger Spielstand,** automatisch gespeichert. Kein Zurück.
+- LitRPG-System: Stufen, Attribute, Fähigkeiten, Ausrüstung mit Seltenheiten, Laden, tägliche Aufgaben.
 
-**Kapitel 1 – Erwachen**
-- **Story:** Intro → Relikt berühren (Erwachen) → Karkosa-Einbruch im Archiv → Rivale Drax in der Trainingshalle → Karkosa-Nest im Ostflügel → Gespräch mit dem Protokoll.
-- **Blut-Hunger-Loop:** Blut-Anzeige leert sich in Echtzeit (END verlangsamt). Bei 0 % Blutmangel: HP-Verlust, weniger Schaden und Tempo.
-- **Blut-Essenzen:** Karkosa-Blut (Rüstung + Stärke), Mutanten-Blut (Schattenkraft, kürzere Abklingzeiten), Menschliches Blut (am meisten Blut + EXP, aber **Verdacht** steigt). Bei 100 % Verdacht jagt dich Ausbilder Varek.
-- **Kampf:** 3er-Kombo mit Zielhilfe, Schatten-Dash, **perfekter Dash** mit Zeitlupe, Blutsichel, Blutlanze, Eklipse.
-- **Progression:** Level-ups mit STR / AGI / END / SHD, Skill-Baum, tägliche System-Quests, verborgene Quests.
+## Build
 
-## APK bekommen
+Jeder Push auf `main` baut per GitHub Actions eine APK:
+https://github.com/Crusha5/Vapier-System/releases/latest/download/sanguine-protocol.apk
 
-Bei jedem Push auf `main` baut GitHub Actions automatisch eine APK und stellt sie als Release bereit:
-**https://github.com/Crusha5/Vapier-System/releases/latest/download/sanguine-protocol.apk**
-(zusätzlich unter Actions → „Android-APK bauen“ → Artifacts)
-
-Signiert wird mit einem festen Schlüssel, der verschlüsselt im Repo liegt (`release.keystore.enc`, Alias `sanguine`).
-Das Passwort steht als Secret `KEYSTORE_PASSWORD` im Repo (Settings → Secrets and variables → Actions).
-Fehlt das Secret, wird ein Wegwerf-Schlüssel erzeugt – dann vor jedem Update die alte App deinstallieren.
-
-## Steuerung
-
-| Touch | Tastatur (zum Testen am PC) |
-|---|---|
-| linke Bildschirmhälfte ziehen: laufen | WASD |
-| großer Knopf: Angriff (halten = Kombo) | J |
-| Doppelpfeil: Schatten-Dash | K / Leertaste |
-| roter Kreis: Blutsichel · weitere Skills nach Freischaltung | L, U, I |
-| Tropfen: Blut-Essenz trinken | F |
-| SYSTEM: Status, Inventar, Skills, Quests | Tab / M |
-| Zurück-Taste: System-Fenster | – |
-
-## Aufbau
-
-| Pfad | Inhalt |
-|---|---|
-| `scripts/autoload/player_stats.gd` | Autoload `PlayerStats`: Werte, Blut-Hunger, Level, Buffs, Inventar, Skill-Baum, Quests, Verdacht, Uhr, Spielstand |
-| `scripts/main.gd` | Spielablauf: Titel, Intro, Erwachen, Story-Regie, Spawns, Kamera, Effekte |
-| `scripts/player/player.gd` | Spielfigur: Bewegung, Kombo, Dash, Skills, Treffer |
-| `scripts/enemies/enemy.gd` | Gegner-KI (Navigation, Telegraph, Kombos, Ansturm, Säure, Nest) |
-| `scripts/enemies/creature_models.gd` | Karkosa- und Mutanten-Modelle mit prozeduraler Animation |
-| `scripts/world/humanoid.gd` | Menschen-Modell mit prozeduraler Animation |
-| `scripts/world/academy.gd` | Level: Räume, Licht, Navigationsnetz |
-| `scripts/world/batcher.gd` | fasst Level-Meshes zusammen (weniger Draw-Calls auf dem Handy) |
-| `scripts/world/toon.gd` | Materialien und Geometrie-Bausteine |
-| `scripts/world/sfx.gd` | prozedurale Soundeffekte |
-| `scripts/ui/hud.gd`, `system_window.gd`, `holo_ui.gd` | Hologramm-HUD, System-Fenster, UI-Baukasten |
-| `shaders/` | Toon-Shading, Inverted-Hull-Konturen, Hologramme |
-| `tests/autotest.tscn` | automatischer Durchlauf von Kapitel 1 mit Prüfungen und Screenshots |
-
-## Lokal testen
-
-```
-godot --path . res://tests/autotest.tscn   # SP_FRESH=1, SHOT_DIR=/pfad für Screenshots
-```
-
-Schriften: Chakra Petch und IBM Plex Mono (SIL Open Font License, siehe `fonts/`).
+Damit Updates ohne Neuinstallation gehen, das Repo-Secret `KEYSTORE_PASSWORD` setzen.

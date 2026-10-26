@@ -1,59 +1,68 @@
 class_name Player
 extends CharacterBody3D
-## Kadett-Subjekt 0: Bewegung, Kombo-Angriff, Schatten-Dash, Blut-Skills, Treffer.
+## Kael: Bewegung im offenen Gelände (relativ zur Kamera), Schwerkraft, Schwimmen, Kombo-Angriff,
+## Schattenschritt, Blutsichel, Treffer. Aussehen folgt der Menschlichkeit.
 
 var world: Node
+var rig: CameraRig
 var model: Humanoid
-var input_dir := Vector2.ZERO   # vom Touch-Joystick (x rechts, y unten)
+var input_dir := Vector2.ZERO
 var facing := Vector3(0, 0, -1)
 var dash_t := 0.0
 var dash_dir := Vector3.ZERO
 var dash_speed := 0.0
 var combo := 0
 var combo_timer := 0.0
-var attack_t := 0.0       # Sperre bis zur nächsten Aktion
-var pending_hit := -1.0   # Zeit bis zum Treffermoment
+var attack_t := 0.0
+var pending_hit := -1.0
 var pending_combo := 0
 var knock := Vector3.ZERO
 var flash := 0.0
 var hurt_t := 0.0
 var lunge := Vector3.ZERO
 var dead := false
-var cds := {"dash": 0.0, "skill1": 0.0, "skill2": 0.0, "skill3": 0.0, "drink": 0.0}
-var cd_max := {"dash": 0.9, "skill1": 4.5, "skill2": 6.0, "skill3": 45.0, "drink": 1.0}
+var busy := false             # Trinken / Zwischensequenz
+var swimming := false
+var cds := {"dash": 0.0, "skill1": 0.0, "skill2": 0.0, "drink": 0.0}
+var cd_max := {"dash": 0.9, "skill1": 4.5, "skill2": 8.0, "drink": 1.0}
 var cast_pending := ""
 var cast_t := 0.0
-var trail_t := 0.0
 var steps_t := 0.0
 var trail: BladeTrail
-var trail_l: BladeTrail
-var hit_streak := 0       # Kombo-Zähler (Treffer in Folge)
+var hit_streak := 0
 var streak_t := 0.0
+var _heading := NAN
+var _last_tier := -1
+var viewblade: Node3D
+var _vb_swing := 0.0
+
+const GRAVITY := 22.0
 
 func _ready() -> void:
 	collision_layer = 2
 	collision_mask = 1
+	floor_snap_length = 0.6
+	floor_max_angle = deg_to_rad(50)
 	var cs := CollisionShape3D.new()
 	var sh := CapsuleShape3D.new()
-	sh.radius = 0.38
-	sh.height = 1.7
+	sh.radius = 0.35
+	sh.height = 1.75
 	cs.shape = sh
-	cs.position.y = 0.85
+	cs.position.y = 0.88
 	add_child(cs)
-	model = Humanoid.new(Looks.player())
+	model = Humanoid.new(Looks.kael())
 	add_child(model)
 	refresh_weapon()
 	PlayerStats.equipment_changed.connect(refresh_weapon)
-	refresh_awakening()
+	PlayerStats.humanity_changed.connect(func(_a, _b): refresh_look())
+	refresh_look()
 
 func refresh_weapon() -> void:
 	var w := PlayerStats.weapon_def()
 	var it: Dictionary = PlayerStats.s.equip.get("weapon", {})
-	var col := Toon.RED
+	var col := Color(0.85, 0.1, 0.12)
 	if not it.is_empty() and int(it.rarity) >= 3:
 		col = Color(1.0, 0.35, 0.15)
-	elif not it.is_empty() and int(it.rarity) == 2:
-		col = Color(1.0, 0.1, 0.45)
 	model.add_blade(col, float(w.len), float(w.width))
 	if PlayerStats.weapon_type() == "daggers":
 		model.add_blade_left(col, float(w.len), float(w.width))
@@ -62,69 +71,107 @@ func refresh_weapon() -> void:
 	if trail == null:
 		trail = BladeTrail.new()
 		world.add_child(trail)
-		trail_l = BladeTrail.new()
-		world.add_child(trail_l)
 	trail.color = col
-	trail_l.color = col
-	model.set_blade_visible(PlayerStats.s.awakened)
+	if rig and rig.first_person:
+		model.set_shadow_only(true)
+	_build_viewblade(col, float(w.len))
 
-func refresh_awakening() -> void:
-	var awake: bool = PlayerStats.s.awakened
-	model.set_blade_visible(awake)
-	if awake:
-		model.set_eye_glow(Color(1.0, 0.1, 0.15), 3.0)
-	else:
-		model.set_eye_glow(Color(0.85, 0.9, 1.0), 0.0)
+## Blässe, Augen und Adern je nach Menschlichkeit
+func refresh_look() -> void:
+	var h := PlayerStats.humanity() / 100.0
+	var skin := Color(0.88, 0.74, 0.66).lerp(Color(0.72, 0.72, 0.78), 1.0 - h)
+	model.set_skin(skin)
+	var tier := PlayerStats.tier()
+	var eye := Color(0.85, 0.8, 0.75).lerp(Color(1.0, 0.05, 0.1), clampf((1.0 - h) * 1.4, 0.0, 1.0))
+	model.set_eye_glow(eye, lerpf(0.4, 4.0, 1.0 - h))
+	_last_tier = tier
+
+func set_first_person(v: bool) -> void:
+	model.set_shadow_only(v)
+	if viewblade:
+		viewblade.visible = v
+
+func _build_viewblade(col: Color, length: float) -> void:
+	if rig == null:
+		return
+	if viewblade:
+		viewblade.queue_free()
+	viewblade = Node3D.new()
+	rig.camera.add_child(viewblade)
+	var arm := MeshInstance3D.new()
+	var am := CapsuleMesh.new()
+	am.radius = 0.05
+	am.height = 0.45
+	arm.mesh = am
+	arm.material_override = Toon.mat(Color(0.1, 0.1, 0.12), {"rough": 0.9})
+	arm.rotation = Vector3(PI * 0.5, 0, 0)
+	arm.position = Vector3(0, 0, 0.18)
+	viewblade.add_child(arm)
+	var b := MeshInstance3D.new()
+	var bm := PrismMesh.new()
+	bm.size = Vector3(0.07, length * 0.8, 0.02)
+	b.mesh = bm
+	b.material_override = Toon.mat(col, {"emit": col, "energy": 2.2})
+	b.rotation = Vector3(-PI * 0.5 + 0.15, 0, 0)
+	b.position = Vector3(0, 0.02, -length * 0.35)
+	b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	viewblade.add_child(b)
+	viewblade.position = Vector3(0.28, -0.24, -0.42)
+	viewblade.visible = rig.first_person
 
 func is_invulnerable() -> bool:
 	return dash_t > 0.0 or dead
 
+func move_heading() -> float:
+	return _heading
+
 func _physics_process(delta: float) -> void:
 	for k in cds:
-		cds[k] = max(0.0, cds[k] - delta)
+		cds[k] = maxf(0.0, cds[k] - delta)
+	if flash > 0.0:
+		flash = maxf(0.0, flash - delta * 4.0)
+		Toon.set_overlay(model, Color(1.0, 0.25, 0.3), flash)
 	if dead:
 		model.animate(delta, 0.0)
+		velocity = Vector3(0, velocity.y - GRAVITY * delta, 0)
+		move_and_slide()
 		return
-	if flash > 0.0:
-		flash = max(0.0, flash - delta * 4.0)
-		Toon.set_overlay(model, Color(1.0, 0.25, 0.3), flash)
 	combo_timer -= delta
 	if combo_timer <= 0.0:
 		combo = 0
 	streak_t -= delta
-	if streak_t <= 0.0 and hit_streak > 0:
+	if streak_t <= 0.0:
 		hit_streak = 0
-	if trail and model.blade:
-		var swinging := model.action == "attack" or cast_pending != ""
-		trail.feed(model.blade_base(), model.blade_tip(), swinging, delta)
-		if model.blade_l:
-			trail_l.feed(model.blade_base(true), model.blade_tip(true), swinging, delta)
 	attack_t -= delta
 	hurt_t -= delta
 	PlayerStats.invulnerable = dash_t > 0.0
-	var dir := Vector3(input_dir.x, 0, input_dir.y)
-	if dir.length() > 1.0:
-		dir = dir.normalized()
-	var locked: bool = world.input_locked()
-	if locked:
-		dir = Vector3.ZERO
-	var spd := PlayerStats.move_speed()
+	var locked: bool = world.input_locked() or busy
+	var stick := input_dir if not locked else Vector2.ZERO
+	var mag := minf(1.0, stick.length())
+	var dir := Vector3.ZERO
+	if mag > 0.08:
+		dir = (rig.right_flat() * stick.x - rig.forward_flat() * stick.y).normalized() * mag
+	var run := mag > 0.85
+	var spd := PlayerStats.move_speed() * (1.5 if run else 1.0)
 	var move := Vector3.ZERO
+	# Wasser
+	var ground_h: float = world.terrain.height_at(global_position.x, global_position.z)
+	swimming = ground_h < -0.95 and global_position.y < -0.6
+	if swimming:
+		spd *= 0.45
 	if dash_t > 0.0:
 		dash_t -= delta
 		move = dash_dir * dash_speed
-		trail_t -= delta
-		if trail_t <= 0.0:
-			trail_t = 0.045
-			world.afterimage(global_position, rotation.y)
-		if dash_t <= 0.0:
-			PlayerStats.invulnerable = false
+		if fmod(dash_t, 0.05) < delta:
+			world.afterimage(global_position, model.global_rotation.y)
 	else:
 		var slow := 0.35 if attack_t > 0.0 else 1.0
 		move = dir * spd * slow
 		if dir.length() > 0.1 and attack_t <= 0.0:
 			facing = dir.normalized()
-	# Treffermoment der Kombo
+	if rig.first_person and dash_t <= 0.0:
+		facing = rig.forward_flat()
+	_heading = atan2(-facing.x, -facing.z) if mag > 0.5 and not rig.first_person else NAN
 	if pending_hit >= 0.0:
 		pending_hit -= delta
 		if pending_hit < 0.0:
@@ -137,56 +184,83 @@ func _physics_process(delta: float) -> void:
 			_resolve_cast(c)
 	move += lunge
 	lunge = lunge.move_toward(Vector3.ZERO, delta * 40.0)
-	velocity = move + knock
-	velocity.y = 0.0
+	var vy := velocity.y
+	if swimming:
+		vy = lerpf(vy, (-0.75 - global_position.y) * 4.0, minf(1.0, delta * 6.0))
+	elif is_on_floor():
+		vy = -1.0
+	else:
+		vy -= GRAVITY * delta
+	velocity = Vector3(move.x + knock.x, vy, move.z + knock.z)
 	knock = knock.move_toward(Vector3.ZERO, delta * 25.0)
 	move_and_slide()
-	global_position.y = 0.0
+	# Weltgrenze: der Schleier
+	var flat := Vector2(global_position.x, global_position.z)
+	if flat.length() > 282.0:
+		var back := flat.normalized() * 281.0
+		global_position.x = back.x
+		global_position.z = back.y
+		world.veil_touch()
+	if global_position.y < ground_h - 3.0:
+		global_position.y = ground_h + 0.5
 	var target_rot := atan2(-facing.x, -facing.z)
-	rotation.y = lerp_angle(rotation.y, target_rot, clamp(delta * 16.0, 0.0, 1.0))
+	model.rotation.y = lerp_angle(model.rotation.y, target_rot, clampf(delta * 14.0, 0.0, 1.0))
 	var hs := Vector2(velocity.x, velocity.z).length()
+	if busy:
+		hs = 0.0
 	model.animate(delta, 0.0 if dash_t > 0.0 else hs, 0.34 / PlayerStats.attack_speed())
-	if hs > 2.0 and dash_t <= 0.0:
+	if trail and model.blade:
+		trail.feed(model.blade_base(), model.blade_tip(), model.action == "attack" or cast_pending != "", delta)
+	if hs > 2.0 and dash_t <= 0.0 and not swimming:
 		steps_t -= delta * hs
 		if steps_t <= 0.0:
-			steps_t = 3.2
+			steps_t = 3.0
 			world.sfx("step")
+	if viewblade and viewblade.visible:
+		_vb_swing = maxf(0.0, _vb_swing - delta * 5.0)
+		var sw := sin(_vb_swing * PI)
+		viewblade.rotation = Vector3(-sw * 0.9, sw * 1.2 * (1.0 if combo % 2 == 0 else -1.0), sw * 0.4)
+		viewblade.position = Vector3(0.28 - sw * 0.25, -0.24 + sw * 0.08 + sin(Time.get_ticks_msec() * 0.006) * hs * 0.002, -0.42)
 
 # ---------- Aktionen ----------
 
-func _nearest_enemy(max_d: float) -> Enemy:
-	var best: Enemy = null
+func nearest_enemy(max_d: float, cone := -0.2) -> Node3D:
+	var best: Node3D = null
 	var bd := max_d
-	for e in get_tree().get_nodes_in_group("enemies"):
-		var en := e as Enemy
-		if en.state == "dead":
+	var fwd := rig.forward_flat() if rig.first_person else facing
+	for e in get_tree().get_nodes_in_group("hostile"):
+		var en := e as Node3D
+		if not en.has_method("is_alive") or not en.is_alive():
 			continue
-		var d := en.global_position.distance_to(global_position) - float(en.cfg.radius)
-		if d < bd:
-			bd = d
-			best = en
+		var d := en.global_position - global_position
+		d.y = 0
+		var l := d.length()
+		if l > bd:
+			continue
+		if l > 1.2 and fwd.dot(d / l) < cone:
+			continue
+		bd = l
+		best = en
 	return best
 
 func attack() -> void:
-	if dead or attack_t > 0.0 or dash_t > 0.0 or world.input_locked():
+	if dead or busy or attack_t > 0.0 or dash_t > 0.0 or world.input_locked() or swimming:
 		return
 	var aspd := PlayerStats.attack_speed()
 	attack_t = 0.36 / aspd
 	if combo == 2:
 		attack_t = 0.5 / aspd
-	var t := _nearest_enemy(5.5)
+	var t := nearest_enemy(5.5, -0.1)
 	if t:
 		var d := t.global_position - global_position
 		d.y = 0
 		if d.length() > 0.01:
 			facing = d.normalized()
-			rotation.y = atan2(-facing.x, -facing.z)
-		var gap := d.length() - float(t.cfg.radius) - 1.0
+		var gap := d.length() - 1.4
 		if gap > 0.2:
-			lunge = facing * min(gap, 3.0) * 9.0
-	elif input_dir.length() > 0.2:
-		lunge = facing * 3.0
+			lunge = facing * minf(gap, 3.0) * 9.0
 	model.play("attack", combo)
+	_vb_swing = 1.0
 	pending_hit = 0.11 / aspd
 	pending_combo = combo
 	combo = (combo + 1) % 3
@@ -196,184 +270,132 @@ func attack() -> void:
 func _resolve_melee(c: int) -> void:
 	var mults: Array[float] = [1.0, 1.15, 1.7]
 	var dmg: float = PlayerStats.melee_damage() * mults[c]
-	if world.eclipse_active():
-		dmg *= 1.5
 	var w := PlayerStats.weapon_def()
-	var reach := (2.5 if c < 2 else 2.9) + float(w.reach)
-	var arc: float = 0.15 + float(w.arc) - 0.15
+	var reach := (2.4 if c < 2 else 2.8) + float(w.reach)
 	var hits := 0
-	for e in get_tree().get_nodes_in_group("enemies"):
-		var en := e as Enemy
-		if en.state == "dead":
+	var fwd := facing
+	for e in get_tree().get_nodes_in_group("hittable"):
+		var en := e as Node3D
+		if not en.has_method("is_alive") or not en.is_alive():
 			continue
 		var d := en.global_position - global_position
 		d.y = 0
-		var l := d.length() - float(en.cfg.radius)
-		if l > reach:
+		var l := d.length() - 0.4
+		if l > reach or absf(en.global_position.y - global_position.y) > 2.2:
 			continue
-		if c < 2 and l > 0.4 and facing.dot(d.normalized()) < arc:
+		if c < 2 and l > 0.4 and fwd.dot(d.normalized()) < float(w.arc):
 			continue
 		var crit := randf() < PlayerStats.crit_chance()
 		var amount := dmg * (1.8 if crit else 1.0) * randf_range(0.92, 1.08)
-		var was_alive := en.hp > 0.0
-		en.take_hit(amount, global_position, 9.0 if c == 2 else 4.0, crit, Color(1.0, 0.85, 0.3) if crit else Color(1, 1, 1))
+		en.take_hit(amount, global_position, 9.0 if c == 2 else 4.0, crit)
 		world.blood_hit(en, global_position, crit or c == 2)
-		if was_alive and en.hp <= 0.0:
-			world.kill_feedback(en)
 		hits += 1
 	if hits > 0:
-		world.hitstop((0.05 if c < 2 else 0.09) + (0.03 if hits > 2 else 0.0))
-		world.shake(0.15 if c < 2 else 0.35)
-		world.cam_punch(0.05 if c < 2 else 0.1)
+		world.hitstop(0.05 if c < 2 else 0.09)
+		rig.shake = maxf(rig.shake, 0.4 if c < 2 else 0.8)
 		world.sfx("hit")
-		world.slash_fx(global_position, facing, c)
 		register_hits(hits)
 		var leech := PlayerStats.gear("leech") * hits
-		if PlayerStats.has_skill("crimson_feast"):
-			leech += 1.5 * hits
+		if PlayerStats.has_skill("frenzy"):
+			leech += 2.0 * hits
 		if leech > 0.0:
 			PlayerStats.add_blood(leech)
-	else:
-		world.slash_fx(global_position, facing, c)
+	world.slash_fx(global_position, facing, c)
 
-## Kombo-Zähler: ab 15 Treffern Blutrausch (+15 % Schaden)
 func register_hits(n: int) -> void:
 	hit_streak += n
 	streak_t = 2.6
-	if hit_streak > int(PlayerStats.s.best_combo):
-		PlayerStats.s.best_combo = hit_streak
-	if hit_streak >= 15:
-		if not PlayerStats.buffs.has("frenzy"):
-			PlayerStats.system_message.emit("BLUTRAUSCH! +15 % Schaden", "blood")
-		PlayerStats.buffs["frenzy"] = 4.0
-	if hit_streak % 10 == 0 and hit_streak > 0:
-		PlayerStats.add_blood(3.0)
 
 func dash() -> void:
-	if dead or cds.dash > 0.0 or dash_t > 0.0 or world.input_locked():
+	if dead or busy or cds.dash > 0.0 or dash_t > 0.0 or world.input_locked():
 		return
-	var dir := Vector3(input_dir.x, 0, input_dir.y)
-	if dir.length() < 0.2:
-		dir = facing
-	dir = dir.normalized()
-	facing = dir
+	var dir := Vector3.ZERO
+	if input_dir.length() > 0.2:
+		dir = (rig.right_flat() * input_dir.x - rig.forward_flat() * input_dir.y).normalized()
+	else:
+		dir = -facing if nearest_enemy(4.0) else facing
 	dash_dir = dir
-	dash_t = 0.2
-	dash_speed = (5.2 + PlayerStats.stat("agi") * 0.1) / 0.2
+	dash_t = 0.22
+	dash_speed = (5.6 + PlayerStats.stat("agi") * 0.1) / 0.22
 	cds.dash = cd_max.dash * PlayerStats.cooldown_mult()
 	attack_t = 0.0
 	pending_hit = -1.0
 	model.play("dash")
 	PlayerStats.invulnerable = true
 	world.sfx("dash")
-	if PlayerStats.has_skill("shadow_echo"):
-		world.shadow_echo(global_position)
-	# Perfekter Dash: ein Angriff stand unmittelbar bevor
 	var perfect := false
-	for e in get_tree().get_nodes_in_group("enemies"):
-		var t := (e as Enemy).time_to_hit(global_position)
-		if t >= 0.0 and t < 0.38:
-			perfect = true
-	if world.spit_incoming(global_position):
-		perfect = true
+	for e in get_tree().get_nodes_in_group("hostile"):
+		if e.has_method("time_to_hit"):
+			var tt: float = e.time_to_hit(global_position)
+			if tt >= 0.0 and tt < 0.38:
+				perfect = true
 	if perfect:
 		PlayerStats.s.perfect_dashes = int(PlayerStats.s.perfect_dashes) + 1
 		PlayerStats.daily_progress("perfect_dash")
 		world.perfect_dash()
 
 func skill(slot: String) -> void:
-	if dead or world.input_locked() or cast_pending != "":
+	if dead or busy or world.input_locked() or cast_pending != "":
 		return
 	var id := ""
 	for k in PlayerStats.SKILLS:
-		if PlayerStats.SKILLS[k].slot == slot and PlayerStats.has_skill(k):
+		if PlayerStats.SKILLS[k].get("slot", "") == slot and PlayerStats.has_skill(k):
 			id = k
-	if id == "" or cds[slot] > 0.0:
+	if id == "" or cds.get(slot, 0.0) > 0.0:
 		return
-	var cost: float = {"blood_scythe": 12.0, "blood_lance": 18.0, "eclipse": 35.0}.get(id, 0.0)
+	var cost: float = {"blood_scythe": 12.0, "radiance": 20.0, "dread": 18.0}.get(id, 0.0)
 	if not PlayerStats.spend_blood(cost):
 		return
-	cds[slot] = cd_max[slot] * (PlayerStats.cooldown_mult() if slot != "skill3" else 1.0)
-	PlayerStats.daily_progress("skill_use")
-	match id:
-		"blood_scythe":
-			model.play("cast")
-			cast_pending = id
-			cast_t = 0.12
-			world.sfx("scythe")
-		"blood_lance":
-			var t := _nearest_enemy(12.0)
-			if t:
-				var d := t.global_position - global_position
-				d.y = 0
-				facing = d.normalized()
-				rotation.y = atan2(-facing.x, -facing.z)
-			model.play("attack", 2)
-			cast_pending = id
-			cast_t = 0.1
-			world.sfx("lance")
-		"eclipse":
-			model.play("cast")
-			world.start_eclipse(4.0)
+	cds[slot] = cd_max[slot] * PlayerStats.cooldown_mult()
+	model.play("cast")
+	cast_pending = id
+	cast_t = 0.14
+	world.sfx("scythe")
 
 func _resolve_cast(id: String) -> void:
 	var dmg := PlayerStats.shadow_damage()
-	if world.eclipse_active():
-		dmg *= 1.5
 	match id:
 		"blood_scythe":
-			world.scythe_fx(global_position)
-			world.shake(0.3)
-			for e in get_tree().get_nodes_in_group("enemies"):
-				var en := e as Enemy
-				if en.state == "dead":
-					continue
-				if en.global_position.distance_to(global_position) - float(en.cfg.radius) < 3.7:
+			world.scythe_fx(global_position, Color(1.0, 0.1, 0.18))
+			rig.shake = 0.6
+			for e in get_tree().get_nodes_in_group("hittable"):
+				var en := e as Node3D
+				if en.has_method("is_alive") and en.is_alive() and en.global_position.distance_to(global_position) < 4.2:
 					var crit := randf() < PlayerStats.crit_chance()
-					var alive := en.hp > 0.0
-					en.take_hit(dmg * 1.1 * (1.8 if crit else 1.0), global_position, 8.0, crit, Toon.RED.lightened(0.3))
+					en.take_hit(dmg * 1.1 * (1.8 if crit else 1.0), global_position, 8.0, crit)
 					world.blood_hit(en, global_position, true)
-					register_hits(1)
-					if alive and en.hp <= 0.0:
-						world.kill_feedback(en)
-		"blood_lance":
-			world.lance_fx(global_position, facing)
-			world.shake(0.25)
-			for e in get_tree().get_nodes_in_group("enemies"):
-				var en := e as Enemy
-				if en.state == "dead":
-					continue
-				var d := en.global_position - global_position
-				d.y = 0
-				var along := d.dot(facing)
-				var side := (d - facing * along).length()
-				if along > -0.5 and along < 11.5 and side < 1.2 + float(en.cfg.radius):
-					var crit := randf() < PlayerStats.crit_chance()
-					var alive := en.hp > 0.0
-					en.take_hit(dmg * 2.0 * (1.8 if crit else 1.0), global_position, 6.0, crit, Toon.RED.lightened(0.3))
-					world.blood_hit(en, global_position, true)
-					register_hits(1)
-					if alive and en.hp <= 0.0:
-						world.kill_feedback(en)
+		"radiance":
+			world.scythe_fx(global_position, Color(1.0, 0.55, 0.4))
+			PlayerStats.heal(PlayerStats.max_hp() * 0.25)
+			for e in get_tree().get_nodes_in_group("hostile"):
+				var en := e as Node3D
+				if en.has_method("is_alive") and en.is_alive() and en.global_position.distance_to(global_position) < 6.0:
+					en.take_hit(dmg * 0.6, global_position, 14.0, false)
+		"dread":
+			world.scythe_fx(global_position, Color(0.5, 0.0, 0.1))
+			rig.shake = 1.0
+			for e in get_tree().get_nodes_in_group("living"):
+				var en := e as Node3D
+				if en.has_method("frighten") and en.global_position.distance_to(global_position) < 12.0:
+					en.frighten(global_position)
 
 func drink() -> void:
-	if dead or cds.drink > 0.0:
+	if dead or busy or cds.drink > 0.0:
 		return
-	var k := PlayerStats.best_capsule()
+	var k := PlayerStats.best_vial()
 	if k == "":
-		PlayerStats.system_message.emit("Keine Blut-Essenzen im Inventar.", "blood")
+		PlayerStats.system_message.emit("Keine Blutphiolen.", "blood")
 		return
-	if PlayerStats.drink(k):
+	if PlayerStats.drink_vial(k):
 		cds.drink = cd_max.drink
 		world.sfx("drink")
-		world.burst(global_position + Vector3(0, 1.2, 0), PlayerStats.BLOOD_TYPES[k].color, 0.8)
 
 func receive_hit(dmg: float, from: Vector3) -> void:
-	if is_invulnerable():
+	if is_invulnerable() or busy:
 		return
 	var dealt := PlayerStats.damage(dmg)
 	if dealt < 0.0:
-		world.damage_number(global_position + Vector3(0, 2.1, 0), 0, Toon.CYAN, false, "AUSGEWICHEN")
+		world.damage_number(global_position + Vector3(0, 2.1, 0), 0, Color(0.6, 0.85, 1.0), false, "AUSGEWICHEN")
 		return
 	if dealt == 0.0:
 		return
@@ -385,11 +407,10 @@ func receive_hit(dmg: float, from: Vector3) -> void:
 	if hurt_t <= 0.0:
 		model.play("hurt")
 		hurt_t = 0.4
-	world.damage_number(global_position + Vector3(0, 2.1, 0), dealt, Color(1.0, 0.3, 0.3), false)
-	world.shake(0.4)
-	world.sfx("hurt")
+	rig.shake = maxf(rig.shake, 1.0)
+	world.on_player_hurt(dealt)
 	if OS.has_feature("mobile"):
-		Input.vibrate_handheld(40)
+		Input.vibrate_handheld(35)
 
 func die() -> void:
 	dead = true
@@ -397,8 +418,10 @@ func die() -> void:
 
 func revive(at: Vector3) -> void:
 	dead = false
-	model.action = ""
-	model.rotation = Vector3.ZERO
+	busy = false
+	model.play("")
+	model.rotation.x = 0.0
 	model.position = Vector3.ZERO
 	global_position = at
+	velocity = Vector3.ZERO
 	knock = Vector3.ZERO

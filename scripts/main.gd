@@ -1,107 +1,266 @@
 extends Node3D
-## Spielablauf: Titel, Intro, Erwachen, Story-Regie (Kapitel 1), Gegner-Spawns, Kamera, Effekte.
-## Stellt die „world“-Schnittstelle für Spieler und Gegner bereit.
+## Sanguine Protocol – offene Welt Veyra. Baut die Welt, setzt Figuren, verbindet Eingabe, Story,
+## Trinken (mit Zeugen), Sonne, Blutsinn, Tod/Wiedererwachen und Effekte.
 
 const H := preload("res://scripts/ui/holo_ui.gd")
+const SPLAT := preload("res://shaders/splat.gdshader")
+const SENSE := preload("res://shaders/sense.gdshader")
 
-var academy: Academy
+var terrain: Terrain
+var places: Places
+var veg: Vegetation
+var daynight: DayNight
 var player: Player
-var camera: Camera3D
+var rig: CameraRig
 var hud: Hud
 var menu: SystemWindow
-var title: Control
 var audio: Sfx
-var state := "title"   # title, play, cutscene, dead
-var _eclipse_t := 0.0
+var story: Story
+var title: Control
+var loading: Label
+var sense_rect: ColorRect
+var state := "loading"     # loading, title, play, talk, dead
+var npcs := {}             # id -> HumanNpc
+var fx: Array = []
+var loot: Array = []
+var decals: Array = []
+var bolts: Array = []
+var heartbeats: Array = []
+var sense_on := false
+var _sense_amt := 0.0
+var interact_id := ""
+var interact_target: Node3D
 var _slow_until := 0
 var _slow_scale := 1.0
 var _hitstop_until := 0
-var _shake := 0.0
-var _cam_focus := Vector3.ZERO
-var _cam_dist := 1.0
-var _cut_focus := Vector3.ZERO
-var capsules: Array = []
-var spits: Array = []
-var fx: Array = []
-var wave_spawned := 0
-var drax: Enemy
-var nest: Enemy
-var instructor: Enemy
-var butcher: Enemy
-var brood: Enemy
-var npcs := {}
-var loot: Array = []
-var decals: Array = []
-var ambient: Array = []
-var ambient_t := 0.0
-var hall_greeted := false
-var last_zone := ""
+var _talk_focus: Variant = null
+var _prev_fp := false
+var _forced_fp := false
+var _model_hidden := false
 var death_t := -1.0
-var interact_id := ""
-var _title_t := 0.0
-var _after_narration: Callable
+var last_zone := ""
+var _zone_t := 0.0
+var _beast_t := 5.0
+var _director_t := 0.0
 var _arc_mesh: ArrayMesh
 var _ring_mesh: ArrayMesh
 var _ribbon_red: ShaderMaterial
-var _ribbon_dark: ShaderMaterial
 var autotest := false
-const SESSION_PATH := "user://session.json"
-var _session_t := 0.0
-var _session_last := 0.0
-var _prev_session := {}
+var _new_armed := false
+var _last_day := 0
+
+const ZONES := [
+	["ruin", "Ruinen der Alten", Vector2(-170, -160), 26.0],
+	["village", "Asch-Furt", Vector2(98, 28), 34.0],
+	["bandits", "Krähes Lager", Vector2(-96, 138), 22.0],
+	["tower", "Wachturm der Wacht", Vector2(212, -92), 24.0],
+	["shrine", "Schrein der Ersten Nacht", Vector2(-205, 95), 12.0],
+	["lander", "Landerwrack „Hoffnung“", Vector2(150, -175), 14.0],
+	["ford", "Die Furt", Vector2(66, 36), 12.0],
+	["lake", "Spiegelsee", Vector2(150, 175), 45.0],
+]
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
-	autotest = (OS.get_environment("SP_AUTOTEST") == "1" or get_parent() != get_tree().root) and OS.get_environment("SP_TITLE") != "1"
-	audio = Sfx.new()
-	add_child(audio)
-	academy = Academy.new()
-	add_child(academy)
-	player = Player.new()
-	player.world = self
-	add_child(player)
-	player.global_position = Academy.PLAYER_START if not PlayerStats.s.awakened else Academy.RESPAWN
-	_spawn_npcs()
-	camera = Camera3D.new()
-	camera.fov = 46.0
-	camera.near = 0.3
-	camera.far = 120.0
-	add_child(camera)
-	camera.make_current()
-	_cam_focus = player.global_position
+	autotest = get_parent() != get_tree().root and OS.get_environment("SP_TITLE") != "1"
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
-	var ui_root := Control.new()
-	ui_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	layer.add_child(ui_root)
+	var ui := Control.new()
+	ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(ui)
+	var sense_layer := CanvasLayer.new()
+	sense_layer.layer = 4
+	add_child(sense_layer)
+	sense_rect = ColorRect.new()
+	sense_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	sense_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sm := ShaderMaterial.new()
+	sm.shader = SENSE
+	sense_rect.material = sm
+	sense_rect.visible = false
+	sense_layer.add_child(sense_rect)
+	loading = H.lbl("VEYRA WIRD GEFORMT …", 18, H.RED, H.F_BOLD)
+	loading.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	loading.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	var bg := ColorRect.new()
+	bg.color = Color(0.01, 0.01, 0.02)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.name = "LoadBG"
+	ui.add_child(bg)
+	ui.add_child(loading)
 	hud = Hud.new()
 	hud.world = self
-	ui_root.add_child(hud)
-	hud.menu_pressed.connect(toggle_menu)
-	hud.interact_pressed.connect(_interact)
-	hud.narration_done.connect(_on_narration_done)
+	hud.title_mode = true
+	ui.add_child(hud)
 	menu = SystemWindow.new()
 	menu.world = self
 	menu.visible = false
-	ui_root.add_child(menu)
+	ui.add_child(menu)
 	menu.closed.connect(toggle_menu)
-	_build_fx_assets()
-	PlayerStats.player_died.connect(_on_player_died)
-	PlayerStats.suspicion_alarm.connect(_spawn_instructor)
-	PlayerStats.quests_changed.connect(_sync_story)
-	PlayerStats.leveled_up.connect(func(_l):
-		burst(player.global_position + Vector3(0, 1.0, 0), H.GOLD, 2.0)
-		hud.show_banner("STUFE %d" % _l))
-	_prev_session = _read_session()
-	_write_session(false)
+	hud.menu_pressed.connect(toggle_menu)
+	hud.interact_pressed.connect(_interact)
+	hud.view_pressed.connect(toggle_view)
+	hud.sense_pressed.connect(toggle_sense)
+	audio = Sfx.new()
+	add_child(audio)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_build_world()
+	bg.queue_free()
+	loading.queue_free()
 	if autotest:
 		state = "play"
 		hud.title_mode = false
-		_sync_story()
 	else:
 		_build_title()
+
+func _build_world() -> void:
+	var t0 := Time.get_ticks_msec()
+	terrain = Terrain.new()
+	add_child(terrain)
+	terrain.generate()
+	places = Places.new()
+	add_child(places)
+	places.build(terrain)
+	veg = Vegetation.new()
+	add_child(veg)
+	veg.generate(terrain, places.exclusions())
+	daynight = DayNight.new()
+	add_child(daynight)
+	rig = CameraRig.new()
+	add_child(rig)
+	player = Player.new()
+	player.world = self
+	player.rig = rig
+	add_child(player)
+	rig.target = player
+	daynight.follow = player
+	player.refresh_weapon()
+	story = Story.new()
+	story.w = self
+	add_child(story)
+	_build_fx_assets()
+	_spawn_world()
+	_place_player()
+	PlayerStats.player_died.connect(_on_player_died)
+	PlayerStats.leveled_up.connect(func(l):
+		burst(player.global_position + Vector3(0, 1, 0), H.GOLD, 2.0)
+		hud.show_banner("STUFE %d" % l))
+	_last_day = int(PlayerStats.s.day)
+	print("Welt fertig in ", Time.get_ticks_msec() - t0, " ms")
+
+func _place_player() -> void:
+	var p: Array = PlayerStats.s.get("pos", [])
+	if PlayerStats.s.started and p.size() == 3:
+		player.global_position = Vector3(p[0], p[1] + 0.3, p[2])
+	else:
+		player.global_position = places.spots.ruin_wake + Vector3(0, 0.2, 0)
+		rig.yaw = PI * 0.8
+	rig.global_position = player.global_position + Vector3(0, 1.5, 0)
+	rig.set_first_person(PlayerStats.s.get("camera_fp", false))
+	player.set_first_person(rig.first_person)
+
+# ---------- Figuren ----------
+
+func _spawn_npc(id: String, name: String, look: Dictionary, at: Vector3, role := "villager", house := -1) -> HumanNpc:
+	if PlayerStats.is_dead(id):
+		return null
+	var n := HumanNpc.new()
+	n.setup(id, name, look, self, at + Vector3(0, 0.2, 0), role)
+	n.fire_spot = places.spots.fire
+	if house >= 0 and house < places.spots.houses.size():
+		var hs: Dictionary = places.spots.houses[house]
+		n.bed_path = [hs.door_out, hs.door_in, hs.bed]
+		n.bed_rot = hs.bed_rot
+	add_child(n)
+	npcs[id] = n
+	return n
+
+func _spawn_world() -> void:
+	var sp: Dictionary = places.spots
+	_spawn_npc("hanna", "Hanna", Looks.hanna(), sp.npc_elder, "elder", 3)
+	var lenz := _spawn_npc("lenz", "Lenz", Looks.village_guard(), sp.npc_guard, "guard")
+	if lenz:
+		lenz.night_owl = true
+	_spawn_npc("greta", "Greta", Looks.innkeeper(), sp.npc_innkeeper, "villager", 1)
+	if npcs.has("greta"):
+		npcs.greta.night_owl = true
+	_spawn_npc("oswin", "Oswin", Looks.smith(), sp.npc_smith, "villager", 6)
+	_spawn_npc("pip", "Pip", Looks.child(), sp.npc_child, "child", 5)
+	_spawn_npc("mara", "Mara", Looks.widow(), sp.npc_widow, "villager", 4)
+	_spawn_npc("hallin", "Bauer Hallin", Looks.settler(5), sp.npc_farmer, "villager", 2)
+	_spawn_npc("ilse", "Ilse", Looks.settler(9), sp.village + Vector3(-10, 0, 8), "villager", 0)
+	_spawn_npc("bo", "Bo", Looks.settler(14), sp.village + Vector3(10, 0, -8), "villager", 2)
+	# Jory im Käfig
+	var jf: String = PlayerStats.flag("jory", "")
+	if jf == "" or jf == "caged":
+		var j := _spawn_npc("jory", "Jory", Looks.jory(), sp.cage, "prisoner")
+		if j:
+			j.heading = PI * 0.5
+	elif jf == "proven":
+		_spawn_npc("jory", "Jory", Looks.jory(), sp.village + Vector3(-6, 0, -4), "villager", 0)
+	if jf in ["proven", "freed"] and places.cage_door:
+		places.cage_door.rotation.y = 1.8
+	# Tamas
+	var tf: String = PlayerStats.flag("tamas", "")
+	if tf == "":
+		_spawn_npc("tamas", "Tamas", Looks.tamas(), sp.wounded, "wounded")
+	elif tf in ["helped", "sipped"]:
+		_spawn_npc("tamas", "Tamas", Looks.tamas(), sp.village + Vector3(4, 0, -6), "villager", 4)
+		PlayerStats.set_flag("tamas_arrived")
+	elif tf in ["drained", "left"]:
+		# Die Leiche liegt am Weg
+		var body := _spawn_npc("tamas_body", "Tamas", Looks.tamas(), sp.wounded, "wounded")
+		if body:
+			body.alive = false
+			body.state = "dead"
+			(body.model as Humanoid).play("dead")
+	# Banditenlager
+	var bc: Vector3 = sp.bandits
+	var bpos := [Vector3(5, 0, 2), Vector3(-4, 0, 5), Vector3(-5, 0, -3), Vector3(3, 0, -6), Vector3(8, 0, -4)]
+	for i in bpos.size():
+		var id := "bandit_%d" % i
+		if PlayerStats.is_dead(id):
+			continue
+		var e := Enemy.new()
+		e.setup("bandit_archer" if i == 4 else "bandit", self, terrain.ground(bc + bpos[i]) + Vector3(0, 0.3, 0), 2 + (i % 2), id)
+		add_child(e)
+	if PlayerStats.flag("krahe", "") == "" and not PlayerStats.is_dead("krahe"):
+		var k := Enemy.new()
+		k.setup("krahe", self, terrain.ground(bc + Vector3(0, 0, -2)) + Vector3(0, 0.3, 0), 4, "krahe")
+		add_child(k)
+	# Hinterhalt an der Weggabelung (nachts)
+	for i in 2:
+		var id := "ambush_%d" % i
+		if PlayerStats.is_dead(id):
+			continue
+		var e := Enemy.new()
+		e.setup("bandit", self, terrain.ground(Vector3(-40 + i * 3, 0, 52 + i * 2)) + Vector3(0, 0.3, 0), 2, id)
+		e.night_only = true
+		add_child(e)
+	# Wacht am Turm
+	for i in 3:
+		var id := "tower_%d" % i
+		if PlayerStats.is_dead(id):
+			continue
+		var e := Enemy.new()
+		e.setup("wacht", self, terrain.ground(sp.tower + Vector3(-5 + i * 3, 0, 7)) + Vector3(0, 0.3, 0), 5, id)
+		add_child(e)
+	# Grauläufer-Herden
+	for hc in [Vector2(-120, -100), Vector2(-20, -120), Vector2(140, 60), Vector2(30, 160), Vector2(-150, 60)]:
+		for k in 4:
+			var a := Animal.new()
+			a.setup(self, terrain.ground(Vector3(hc.x + randf_range(-6, 6), 0, hc.y + randf_range(-6, 6))) + Vector3(0, 0.3, 0))
+			add_child(a)
+	# Reißer-Rudel (nachts)
+	for pc in [Vector2(-60, 110), Vector2(-150, -40), Vector2(80, -110), Vector2(160, 120)]:
+		for k in 2:
+			var e := Enemy.new()
+			e.setup("reisser", self, terrain.ground(Vector3(pc.x + k * 2.0, 0, pc.y)) + Vector3(0, 0.3, 0), 2 + k)
+			e.night_only = true
+			add_child(e)
 
 # ---------- Titel ----------
 
@@ -114,7 +273,7 @@ func _build_title() -> void:
 	title.process_mode = Node.PROCESS_MODE_ALWAYS
 	hud.get_parent().add_child(title)
 	var bg := ColorRect.new()
-	bg.color = Color(0.0, 0.0, 0.02, 0.62)
+	bg.color = Color(0.0, 0.0, 0.02, 0.5)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title.add_child(bg)
@@ -125,1072 +284,732 @@ func _build_title() -> void:
 	title.add_child(box)
 	var icon := TextureRect.new()
 	icon.texture = load("res://icon.png")
-	icon.custom_minimum_size = Vector2(190, 190)
+	icon.custom_minimum_size = Vector2(170, 170)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	box.add_child(icon)
 	var v := H.vbox(5)
 	v.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	box.add_child(v)
-	v.add_child(H.caps("Vanguard-Akademie · Jahr 2185", H.CYAN, 12))
-	var t1 := H.lbl("SANGUINE", 38, H.FG, H.F_BOLD)
+	v.add_child(H.caps("Kolonie Veyra · hinter dem Schleier", H.CYAN, 12))
+	var t1 := H.lbl("SANGUINE", 36, H.FG, H.F_BOLD)
 	t1.add_theme_color_override("font_outline_color", Color(0.4, 0.0, 0.05))
 	t1.add_theme_constant_override("outline_size", 8)
 	v.add_child(t1)
-	var t2 := H.lbl("PROTOCOL", 38, H.RED, H.F_BOLD)
-	v.add_child(t2)
-	v.add_child(H.lbl("Kapitel 2 · Knochen und Erinnerung" if int(PlayerStats.s.story) >= 5 else "Kapitel 1 · Erwachen", 15, H.MUTED, H.F_SEMI))
-	var sp := Control.new()
-	sp.custom_minimum_size = Vector2(0, 4)
-	v.add_child(sp)
-	var has_save: bool = PlayerStats.s.awakened or int(PlayerStats.s.story) > 0
-	if has_save:
-		var b1 := H.btn("Weiter  ·  Stufe %d" % int(PlayerStats.s.level), func(): _start_game(false), "BtnRed")
-		b1.custom_minimum_size = Vector2(260, 46)
+	v.add_child(H.lbl("PROTOCOL", 36, H.RED, H.F_BOLD))
+	v.add_child(H.lbl("Akt 1 · Die Erste Nacht", 14, H.MUTED, H.F_SEMI))
+	if PlayerStats.s.started:
+		var b1 := H.btn("Fortsetzen  ·  Tag %d · %s" % [int(PlayerStats.s.day), PlayerStats.tier_name()], func(): _start(false), "BtnRed")
+		b1.custom_minimum_size = Vector2(280, 44)
 		v.add_child(b1)
-	var b2 := H.btn("Neues Spiel", func(): _confirm_new(has_save), "" if has_save else "BtnRed")
-	b2.custom_minimum_size = Vector2(260, 44)
+	var b2 := H.btn("Neues Spiel", func(): _confirm_new(), "" if PlayerStats.s.started else "BtnRed")
+	b2.custom_minimum_size = Vector2(280, 42)
 	v.add_child(b2)
-	v.add_child(H.lbl("v0.2.0 · Prototyp", 10, Color(H.MUTED, 0.6), H.F_MONO))
-	if not _prev_session.is_empty() and not _prev_session.get("clean", true):
-		var info := H.wrap("Letzte Sitzung wurde unerwartet beendet nach %d s (%s, Story %d)." % [int(_prev_session.get("uptime", 0)), _prev_session.get("state", "?"), int(_prev_session.get("story", 0))], 11, H.RED)
-		info.custom_minimum_size = Vector2(260, 0)
-		v.add_child(info)
-		var rb := H.btn("Fehlerbericht kopieren", func(): _copy_report(), "BtnRed")
-		rb.custom_minimum_size = Vector2(260, 36)
-		v.add_child(rb)
+	var note := H.wrap("Ein einziger Spielstand. Jede Entscheidung wird sofort gespeichert – es gibt kein Zurück.", 10, Color(H.MUTED, 0.8))
+	note.custom_minimum_size = Vector2(280, 0)
+	v.add_child(note)
+	v.add_child(H.lbl("v0.3.0 · Open-World-Prototyp", 9, Color(H.MUTED, 0.6), H.F_MONO))
 
-var _new_armed := false
-func _confirm_new(has_save: bool) -> void:
-	if has_save and not _new_armed:
+func _confirm_new() -> void:
+	if PlayerStats.s.started and not _new_armed:
 		_new_armed = true
-		PlayerStats.system_message.emit("Spielstand wird überschrieben – zum Bestätigen erneut tippen.", "warn")
+		PlayerStats.system_message.emit("Alles, was du getan hast, geht verloren. Zum Bestätigen erneut tippen.", "warn")
 		return
+	PlayerStats.delete_save()
 	PlayerStats.reset_game()
-	PlayerStats.save_game()
-	_start_game(true)
+	get_tree().reload_current_scene()
 
-func _start_game(fresh: bool) -> void:
+func _start(fresh: bool) -> void:
 	if title:
 		title.queue_free()
 		title = null
 	hud.title_mode = false
+	state = "play"
 	audio.start_ambient()
-	audio.play("boom", -6.0)
-	player.refresh_awakening()
-	if fresh or not PlayerStats.s.awakened:
-		player.revive(Academy.PLAYER_START)
-		player.facing = (Academy.RELIC_POS - Academy.PLAYER_START).normalized()
-		state = "cutscene"
-		hud.narrate([
-			{"who": "", "text": "Jahr 2185. Die Menschheit führt einen Vernichtungskrieg gegen die Karkosa – eine insektoide, hochentwickelte Alien-Rasse."},
-			{"who": "", "text": "An der Vanguard-Akademie werden genetisch veredelte Kadetten zu Supersoldaten geformt."},
-			{"who": "", "text": "Du bist Kadett-Subjekt 0. Keine Gen-Anpassungen. Kein Rang. Kein Schutz."},
-			{"who": "", "text": "Auf der Flucht vor Drax und seiner Bande hast du dich in die Ruinen des alten Archivs gerettet. Etwas pulsiert dort im Dunkeln …"},
-		])
-		_after_narration = func():
-			state = "play"
-			PlayerStats.system_message.emit("Hauptquest: Untersuche das Relikt im Archiv.", "quest")
+	if not PlayerStats.s.started:
+		player.model.play("lie")
+		story.intro()
 	else:
-		player.revive(Academy.RESPAWN)
-		state = "play"
-		_sync_story()
-		hud.show_zone(Academy.ZONE_NAMES.archive)
+		hud.show_zone("Veyra · Tag %d" % int(PlayerStats.s.day))
+
+func awaken_fx() -> void:
+	audio.play("awaken", 0.0, 0.0)
+	rig.shake = 1.2
+	hud.red_flash = 1.0
+	burst(places.spots.ruin_altar + Vector3(0, 1.5, 0), Color(1.0, 0.1, 0.15), 2.5)
+	player.model.play("")
+	player.refresh_look()
 
 # ---------- Welt-Schnittstelle ----------
 
 func input_locked() -> bool:
-	return state != "play" or hud.narrating()
+	return state != "play" or hud.in_dialog()
 
 func menu_open() -> bool:
 	return menu.visible
 
-func player_dead() -> bool:
-	return player.dead
-
-func eclipse_active() -> bool:
-	return _eclipse_t > 0.0
-
-func start_eclipse(d: float) -> void:
-	_eclipse_t = d
-	audio.play("awaken", -4.0, 0.0)
-	hud.show_banner("ECLIPSE")
-	burst(player.global_position + Vector3(0, 1, 0), H.PURPLE, 3.0)
+func active_boss() -> Actor:
+	for e in get_tree().get_nodes_in_group("hostile"):
+		if e is Enemy and (e as Enemy).is_boss() and (e as Enemy).aggro and (e as Enemy).alive:
+			return e
+	return null
 
 func sfx(name: String) -> void:
-	var vol := {"step": -14.0, "swing": -6.0, "tick": -8.0, "hit": -3.0}.get(name, -4.0) as float
+	var vol := {"step": -16.0, "swing": -6.0, "tick": -8.0, "hit": -3.0}.get(name, -4.0) as float
 	audio.play(name, vol)
-
-func shake(a: float) -> void:
-	_shake = max(_shake, a)
 
 func hitstop(t: float) -> void:
 	_hitstop_until = Time.get_ticks_msec() + int(t * 1000.0)
 
 func perfect_dash() -> void:
-	_slow_until = Time.get_ticks_msec() + 650
+	_slow_until = Time.get_ticks_msec() + 600
 	_slow_scale = 0.3
 	hud.perfect_t = 0.9
 	audio.play("perfect", -2.0, 0.0)
 
-func active_boss() -> Enemy:
-	for b in [instructor, brood, butcher, drax, nest]:
-		if b != null and is_instance_valid(b) and b.state != "dead" and b.aggro and b.global_position.distance_to(player.global_position) < 26.0:
-			return b
-	return null
+func veil_touch() -> void:
+	if Time.get_ticks_msec() % 4000 < 40:
+		PlayerStats.system_message.emit("Der Schleier brennt auf deiner Haut. Weiter geht es nicht.", "warn")
+	PlayerStats.damage(0.3, true)
 
-func spawn_enemy(kind: String, pos: Vector3, lvl := -1) -> Enemy:
-	if lvl < 0:
-		lvl = max(1, int(PlayerStats.s.level) + randi_range(-1, 1))
-	var e := Enemy.new()
-	e.setup(kind, self, pos, lvl)
-	add_child(e)
-	e.rotation.y = randf() * TAU
-	return e
+func on_player_hurt(dealt: float) -> void:
+	damage_number(player.global_position + Vector3(0, 2.1, 0), dealt, Color(1.0, 0.3, 0.3), false)
+	sfx("hurt")
+	hud.red_flash = maxf(hud.red_flash, 0.35)
 
-func damage_number(pos: Vector3, amount: float, color: Color, crit: bool, text := "") -> void:
-	var l := Label3D.new()
-	l.text = text if text != "" else str(int(round(amount)))
-	if crit and text == "":
-		l.text += "!"
-	l.font = H.F_BOLD
-	l.font_size = 64 if crit else 48
-	l.pixel_size = 0.006
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.85)
-	l.outline_size = 14
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
-	l.fixed_size = false
-	l.render_priority = 10
-	l.position = pos + Vector3(randf_range(-0.3, 0.3), 0, randf_range(-0.2, 0.2))
-	add_child(l)
-	fx.append({"n": l, "t": 0.0, "life": 0.75, "kind": "num", "v": Vector3(0, 2.6, 0)})
+func begin_talk(focus: Variant) -> void:
+	if state == "play":
+		state = "talk"
+	_talk_focus = focus
+	player.input_dir = Vector2.ZERO
+	if focus is HumanNpc:
+		(focus as HumanNpc).talking = true
 
-func burst(pos: Vector3, color: Color, size := 1.0) -> void:
-	var p := CPUParticles3D.new()
-	var m := BoxMesh.new()
-	m.size = Vector3.ONE * 0.09 * size
-	p.mesh = m
-	p.material_override = Toon.mat(color, {"emit": color, "energy": 2.5})
-	p.amount = int(10 + 6 * size)
-	p.lifetime = 0.55
-	p.one_shot = true
-	p.explosiveness = 1.0
-	p.direction = Vector3.UP
-	p.spread = 180.0
-	p.initial_velocity_min = 2.0 * size
-	p.initial_velocity_max = 5.5 * size
-	p.gravity = Vector3(0, -9.0, 0)
-	p.scale_amount_min = 0.5
-	p.scale_amount_max = 1.2
-	p.position = pos
-	p.emitting = true
-	add_child(p)
-	fx.append({"n": p, "t": 0.0, "life": 1.0, "kind": "free"})
+func end_talk() -> void:
+	if _talk_focus is HumanNpc and is_instance_valid(_talk_focus):
+		(_talk_focus as HumanNpc).talking = false
+	_talk_focus = null
+	if state == "talk":
+		state = "play"
 
-func afterimage(pos: Vector3, rot_y: float) -> void:
-	var mi := MeshInstance3D.new()
-	var c := CapsuleMesh.new()
-	c.radius = 0.32
-	c.height = 1.75
-	c.radial_segments = 8
-	c.rings = 2
-	mi.mesh = c
-	mi.material_override = Toon.holo(Color(0.75, 0.05, 0.2), 1.2, false, 0.5)
-	mi.position = pos + Vector3(0, 0.9, 0)
-	mi.rotation.y = rot_y
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
-	fx.append({"n": mi, "t": 0.0, "life": 0.28, "kind": "fade"})
+func toggle_view() -> void:
+	rig.set_first_person(not rig.first_person)
+	player.set_first_person(rig.first_person)
+	PlayerStats.s.camera_fp = rig.first_person
+	_forced_fp = false
+	sfx("tick")
 
-func shadow_echo(pos: Vector3) -> void:
-	burst(pos + Vector3(0, 0.8, 0), Color(0.5, 0.2, 0.9), 1.6)
-	fx.append({"n": null, "t": 0.0, "life": 0.18, "kind": "echo", "pos": pos})
-
-func slash_fx(pos: Vector3, dir: Vector3, combo: int) -> void:
-	var mi := MeshInstance3D.new()
-	mi.mesh = _ring_mesh if combo == 2 else _arc_mesh
-	mi.material_override = _ribbon_red
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.position = pos + Vector3(0, 1.0 if combo < 2 else 0.25, 0)
-	mi.rotation.y = atan2(-dir.x, -dir.z)
-	if combo == 1:
-		mi.scale = Vector3(-1, 1, 1)
-	add_child(mi)
-	fx.append({"n": mi, "t": 0.0, "life": 0.2, "kind": "fade", "spin": 6.0 if combo == 0 else -6.0})
-
-func scythe_fx(pos: Vector3) -> void:
-	for k in 2:
-		var mi := MeshInstance3D.new()
-		mi.mesh = _ring_mesh
-		mi.material_override = _ribbon_red if k == 0 else _ribbon_dark
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.position = pos + Vector3(0, 0.5 + k * 0.5, 0)
-		mi.scale = Vector3.ONE * 0.4
-		add_child(mi)
-		fx.append({"n": mi, "t": 0.0, "life": 0.38, "kind": "grow", "to": 1.75 - k * 0.2, "spin": 14.0 * (1 if k == 0 else -1)})
-	burst(pos + Vector3(0, 0.8, 0), Color(1.0, 0.1, 0.2), 1.4)
-
-func lance_fx(pos: Vector3, dir: Vector3) -> void:
-	var mi := MeshInstance3D.new()
-	var b := BoxMesh.new()
-	b.size = Vector3(0.45, 0.25, 11.0)
-	mi.mesh = b
-	mi.material_override = Toon.holo(Color(1.0, 0.1, 0.2), 2.6, false, 0.3)
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.position = pos + Vector3(0, 1.1, 0) + dir * 5.8
-	mi.rotation.y = atan2(-dir.x, -dir.z)
-	add_child(mi)
-	fx.append({"n": mi, "t": 0.0, "life": 0.3, "kind": "fade"})
-	burst(pos + Vector3(0, 1.1, 0) + dir * 11.0, Color(1.0, 0.2, 0.3), 1.2)
-
-func spawn_capsule(kind: String, pos: Vector3) -> void:
-	var n := Node3D.new()
-	var c: Color = PlayerStats.BLOOD_TYPES[kind].color
-	var glass := Toon.cyl(n, 0.14, 0.14, 0.42, Vector3.ZERO, Toon.mat(Color(0.75, 0.8, 0.9), {"outline": 0.02, "radial": 1.0, "rim": 0.6}), 8)
-	glass.name = "Glass"
-	Toon.cyl(n, 0.1, 0.1, 0.3, Vector3(0, 0.0, 0), Toon.mat(c, {"emit": c, "energy": 2.6}), 8)
-	Toon.cyl(n, 0.16, 0.16, 0.06, Vector3(0, 0.23, 0), Toon.mat(Toon.METAL, {"outline": 0.02}), 8)
-	Toon.cyl(n, 0.16, 0.16, 0.06, Vector3(0, -0.23, 0), Toon.mat(Toon.METAL, {"outline": 0.02}), 8)
-	var ring := Toon.quad_holo(n, Vector2(1.2, 1.2), Vector3(0, -0.62, 0), Toon.holo(c, 1.2, true, 0.0))
-	ring.name = "Ring"
-	n.position = pos + Vector3(0, 0.7, 0)
-	n.rotation.z = 0.35
-	add_child(n)
-	capsules.append({"n": n, "kind": kind, "t": 0.0, "base": pos})
-
-func spawn_spit(from: Vector3, to: Vector3, dmg: float) -> void:
-	var n := Node3D.new()
-	Toon.sphere(n, 0.2, Vector3.ZERO, Toon.mat(Color(0.7, 0.3, 1.0), {"emit": Color(0.7, 0.3, 1.0), "energy": 3.0}), Vector3.ONE, 8)
-	n.position = from
-	add_child(n)
-	var dir := (to - from)
-	dir.y = 0
-	spits.append({"n": n, "v": dir.normalized() * 11.0, "t": 0.0, "dmg": dmg})
-	sfx("lance")
-
-func spit_incoming(pos: Vector3) -> bool:
-	for s in spits:
-		var n: Node3D = s.n
-		var d := pos - n.global_position
-		d.y = 0
-		if d.length() < 3.0 and d.dot(s.v) > 0.0:
-			return true
-	return false
-
-# ---------- Blut, Treffer, Beute ----------
-
-const SPLAT_SHADER := preload("res://shaders/splat.gdshader")
-
-func cam_punch(a: float) -> void:
-	_cam_dist = maxf(0.8, _cam_dist - a)
-
-func blood_hit(en: Enemy, from: Vector3, big: bool) -> void:
-	if not is_instance_valid(en):
-		return
-	var col := en.blood_color()
-	var dir := en.global_position - from
-	dir.y = 0
-	dir = dir.normalized() if dir.length() > 0.01 else Vector3.FORWARD
-	var p := CPUParticles3D.new()
-	var m := SphereMesh.new()
-	m.radius = 0.05
-	m.height = 0.1
-	m.radial_segments = 4
-	m.rings = 2
-	p.mesh = m
-	p.material_override = Toon.mat(col, {"emit": col * 0.4, "energy": 1.0})
-	p.amount = 14 if big else 8
-	p.lifetime = 0.5
-	p.one_shot = true
-	p.explosiveness = 1.0
-	p.direction = (dir + Vector3(0, 0.6, 0)).normalized()
-	p.spread = 35.0
-	p.initial_velocity_min = 3.0
-	p.initial_velocity_max = 7.5 if big else 5.0
-	p.gravity = Vector3(0, -16.0, 0)
-	p.scale_amount_min = 0.6
-	p.scale_amount_max = 1.6 if big else 1.1
-	p.position = en.global_position + Vector3(0, 1.1 if en.kind != "brood" else 2.0, 0)
-	p.emitting = true
-	add_child(p)
-	fx.append({"n": p, "t": 0.0, "life": 0.9, "kind": "free"})
-	if big or randf() < 0.3:
-		splat(en.global_position + dir * randf_range(0.6, 1.4), col, randf_range(0.7, 1.3) if not big else randf_range(1.1, 1.8))
-
-func splat(pos: Vector3, col: Color, size: float) -> void:
-	var mi := MeshInstance3D.new()
-	var q := QuadMesh.new()
-	q.size = Vector2(size, size)
-	mi.mesh = q
-	var mat := ShaderMaterial.new()
-	mat.shader = SPLAT_SHADER
-	mat.set_shader_parameter("color", Color(col.r * 0.7, col.g * 0.7, col.b * 0.7, 0.85))
-	mat.set_shader_parameter("seed", randf() * 100.0)
-	mi.material_override = mat
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.rotation = Vector3(-PI * 0.5, randf() * TAU, 0)
-	mi.position = Vector3(pos.x, 0.03 + decals.size() * 0.0004, pos.z)
-	add_child(mi)
-	decals.append({"n": mi, "m": mat, "t": 0.0})
-	if decals.size() > 40:
-		var old: Dictionary = decals.pop_front()
-		(old.n as Node).queue_free()
-
-func _update_decals(delta: float) -> void:
-	for d in decals:
-		d.t += delta
-		if float(d.t) > 22.0:
-			(d.m as ShaderMaterial).set_shader_parameter("alpha", clampf(1.0 - (float(d.t) - 22.0) / 6.0, 0.0, 1.0))
-	while decals.size() > 0 and float(decals[0].t) > 28.0:
-		var old: Dictionary = decals.pop_front()
-		(old.n as Node).queue_free()
-
-func kill_feedback(en: Enemy) -> void:
-	if en.is_boss():
-		_slow_until = Time.get_ticks_msec() + 1300
-		_slow_scale = 0.22
-		shake(1.0)
-		hud.show_banner("%s BESIEGT" % en.display_name().to_upper())
-		audio.play("boom", 0.0, 0.0)
-		for i in 3:
-			splat(en.global_position + Vector3(randf_range(-1.5, 1.5), 0, randf_range(-1.5, 1.5)), en.blood_color(), randf_range(1.5, 2.6))
-	else:
-		hitstop(0.07)
-		splat(en.global_position, en.blood_color(), randf_range(1.2, 1.9))
-
-func shockwave(pos: Vector3, radius: float, col: Color) -> void:
-	var mi := MeshInstance3D.new()
-	mi.mesh = _ring_mesh
-	var mat := (Toon.holo(col, 2.4, false, 0.0)).duplicate()
-	mat.set_shader_parameter("ribbon", 1.0)
-	mi.material_override = mat
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.position = pos + Vector3(0, 0.15, 0)
-	mi.scale = Vector3.ONE * 0.3
-	add_child(mi)
-	fx.append({"n": mi, "t": 0.0, "life": 0.35, "kind": "grow", "to": radius / 2.0, "spin": 3.0})
-	burst(pos + Vector3(0, 0.3, 0), col, 1.6)
-	if pos.distance_to(player.global_position) < 14.0:
-		shake(0.45)
-	sfx("boom")
-
-func roll_loot(en: Enemy) -> void:
-	var zone := academy.zone_at(en.global_position)
-	if Academy.CRYPT_ZONES.has(zone):
-		PlayerStats.side_progress("brann_crypt")
-	var lvl := int(round((en.level_mult - 1.0) / 0.12 + 1))
-	var shards := {"karkosa": 1, "karkosa_elite": 4, "mutant": 2, "cadet": 2, "drax": 25, "instructor": 40, "nest": 20, "butcher": 35, "brood": 80}.get(en.kind, 1) as int
-	shards += randi() % 2
-	PlayerStats.add_shards(shards)
-	PlayerStats.system_message.emit("+%d Blutsplitter" % shards, "mini")
-	var chance := {"karkosa": 0.07, "karkosa_elite": 0.35, "mutant": 0.12, "cadet": 0.15}.get(en.kind, 1.0) as float
-	if randf() > chance:
-		return
-	var it: Dictionary
-	match en.kind:
-		"brood":
-			it = Items.make("weapon", lvl + 1, 3)
-		"butcher", "instructor":
-			it = Items.random_drop(lvl + 1, 0.2, 2)
-		"drax", "nest":
-			it = Items.random_drop(lvl, 0.1, 1)
-		"karkosa_elite":
-			it = Items.random_drop(lvl, 0.08)
-		_:
-			it = Items.random_drop(lvl)
-	spawn_loot(it, en.global_position)
-	if en.is_boss() and en.kind != "brood":
-		spawn_loot(Items.random_drop(lvl, 0.05, 1), en.global_position + Vector3(1.2, 0, 0.6))
-
-func spawn_loot(it: Dictionary, pos: Vector3) -> void:
-	var n := Node3D.new()
-	var col := Items.color(it)
-	var beam := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.06
-	cm.bottom_radius = 0.22
-	cm.height = 3.2 + int(it.rarity) * 0.8
-	cm.radial_segments = 8
-	cm.rings = 1
-	beam.mesh = cm
-	beam.material_override = Toon.holo(col, 1.0 + int(it.rarity) * 0.4, false, 0.4)
-	beam.position.y = cm.height * 0.5
-	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	n.add_child(beam)
-	var icon := MeshInstance3D.new()
-	var shape: Mesh
-	match String(it.slot):
-		"weapon":
-			var pm := PrismMesh.new()
-			pm.size = Vector3(0.12, 0.8, 0.05)
-			shape = pm
-		"armor":
-			var bm := BoxMesh.new()
-			bm.size = Vector3(0.45, 0.5, 0.15)
-			shape = bm
-		_:
-			var sm := SphereMesh.new()
-			sm.radius = 0.2
-			sm.height = 0.4
-			sm.radial_segments = 8
-			sm.rings = 4
-			shape = sm
-	icon.mesh = shape
-	icon.material_override = Toon.mat(col, {"emit": col, "energy": 1.4, "outline": 0.025})
-	icon.position.y = 0.75
-	icon.name = "Icon"
-	n.add_child(icon)
-	var l := Label3D.new()
-	l.text = String(it.name)
-	l.font = H.F_BOLD
-	l.font_size = 40
-	l.pixel_size = 0.006
-	l.modulate = col
-	l.outline_size = 12
-	l.outline_modulate = Color(0, 0, 0, 0.85)
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
-	l.position.y = 1.5
-	n.add_child(l)
-	var ring := Toon.quad_holo(n, Vector2(1.4, 1.4), Vector3(0, 0.05, 0), Toon.holo(col, 1.2, true, 0.0))
-	ring.name = "Ring"
-	n.position = pos + Vector3(randf_range(-0.6, 0.6), 0, randf_range(-0.6, 0.6))
-	add_child(n)
-	loot.append({"n": n, "item": it, "t": 0.0})
-	if int(it.rarity) >= 2:
-		audio.play("quest", -4.0, 0.0)
-
-func _update_loot(delta: float) -> void:
-	var keep: Array = []
-	for d in loot:
-		var n: Node3D = d.n
-		d.t += delta
-		var icon := n.get_node("Icon") as Node3D
-		icon.rotation.y += delta * 2.5
-		icon.position.y = 0.75 + sin(float(d.t) * 3.0) * 0.1
-		if float(d.t) > 0.5 and not player.dead and n.global_position.distance_to(player.global_position) < 1.3:
-			if PlayerStats.add_item(d.item):
-				burst(n.global_position + Vector3(0, 0.8, 0), Items.color(d.item), 0.9)
-				sfx("tick")
-				n.queue_free()
-				continue
-			d.t = -3.0
-		keep.append(d)
-	loot = keep
-
-# ---------- NPCs ----------
-
-func _spawn_npcs() -> void:
-	var mira := Npc.create("mira", "Mira", Looks.mira(), Academy.MIRA_POS, PI, self)
-	add_child(mira)
-	npcs["mira"] = mira
-	var brann := Npc.create("brann", "Brann", Looks.brann(), Academy.BRANN_POS, PI, self)
-	brann.talk_range = 3.9
-	add_child(brann)
-	npcs["brann"] = brann
-
-func _update_npc_markers() -> void:
-	var st := int(PlayerStats.s.story)
-	var mira: Npc = npcs.get("mira")
-	var brann: Npc = npcs.get("brann")
-	if mira:
-		var ms := PlayerStats.side_state("mira_blood")
-		mira.set_marker(st == 5 or ms == "ready" or (ms == "active" and int(PlayerStats.s.inventory.karkosa) >= 2), "!" if st == 5 else "?")
-	if brann:
-		var bp := PlayerStats.side_state("brann_pest")
-		var bc := PlayerStats.side_state("brann_crypt")
-		brann.set_marker((st >= 2 and bp == "") or bp == "ready" or bc == "ready" or (st >= 8 and bc == ""), "?" if bp == "ready" or bc == "ready" else "!")
-
-func _talk(id: String) -> void:
-	var npc: Npc = npcs[id]
-	npc.talking = true
-	var st := int(PlayerStats.s.story)
-	var lines: Array = []
-	var after := func(): pass
-	match id:
-		"mira":
-			var ms := PlayerStats.side_state("mira_blood")
-			if st < 5:
-				lines = [{"who": "Mira", "text": "Hm? Lass mich in Ruhe, Ungeformter. Drax beobachtet uns."}]
-			elif st == 5:
-				lines = [
-					{"who": "Mira", "text": "Da bist du ja. Ich hab dich gesehen – im Archiv. Deine Augen haben rot geleuchtet."},
-					{"who": "Mira", "text": "Keine Angst, ich verrate nichts. Mein Bruder war auch ein Ungeformter. Er ist vor einem Jahr in den Katakomben verschwunden."},
-					{"who": "Mira", "text": "Unter dem Archiv gibt es einen alten Aufzug. Brann, der Quartiermeister, hatte die Zugangskarte …"},
-					{"who": "Mira", "text": "… bis ihm ein riesiger Mutant – der Schlächter – sie im Innenhof abgenommen hat. Hol sie zurück. Bitte."},
-					{"who": "Mira", "text": "Und noch was: Wenn du Karkosa-Blut übrig hast, bring mir zwei Essenzen. Ich will verstehen, was es mit uns macht."},
-				]
-				after = func():
-					PlayerStats.set_story(6)
-					PlayerStats.side_start("mira_blood")
-			elif ms == "active" and int(PlayerStats.s.inventory.karkosa) >= 2:
-				lines = [
-					{"who": "Mira", "text": "Zwei Essenzen! Danke. Ich habe die Daten aus den Krankenakten gelöscht, die dich verraten hätten."},
-					{"who": "Mira", "text": "Nimm das hier. Mein Bruder hat es getragen."},
-				]
-				after = func():
-					PlayerStats.s.inventory.karkosa = int(PlayerStats.s.inventory.karkosa) - 2
-					PlayerStats.s.side.mira_blood.progress = 2
-					PlayerStats.side_finish("mira_blood")
-					PlayerStats.s.suspicion = maxf(0.0, float(PlayerStats.s.suspicion) - 30.0)
-					PlayerStats.system_message.emit("Verdacht −30 %", "reward")
-					spawn_loot(Items.make("relic", int(PlayerStats.s.level), 2), player.global_position + player.facing * 1.2)
-			elif ms == "active":
-				lines = [{"who": "Mira", "text": "Zwei Karkosa-Essenzen, mehr brauche ich nicht. Du findest sie bei den Insekten."}]
-			elif st == 6:
-				lines = [{"who": "Mira", "text": "Der Schlächter treibt sich im Innenhof herum. Pass auf seine Schläge auf – der Boden bebt."}]
-			elif st == 7:
-				lines = [{"who": "Mira", "text": "Du hast die Karte! Der Aufzug steht in der Südost-Ecke des Archivs. Finde heraus, was da unten ist."}]
-			elif st < 10:
-				lines = [{"who": "Mira", "text": "Hast du etwas über meinen Bruder gefunden? … Nein? Dann such weiter. Bitte."}]
-			else:
-				lines = [{"who": "Mira", "text": "Die Brutmutter ist tot. Wenigstens weiß ich jetzt, was meinen Bruder geholt hat. Danke, Nachtfürst."}]
-		"brann":
-			var bp := PlayerStats.side_state("brann_pest")
-			var bc := PlayerStats.side_state("brann_crypt")
-			if bp == "ready":
-				lines = [{"who": "Brann", "text": "Fünfzehn Insekten weniger. Gute Arbeit, Kleiner. Hier – frisch aus dem Lager."}]
-				after = func():
-					PlayerStats.side_finish("brann_pest")
-					PlayerStats.add_shards(60)
-					spawn_loot(Items.random_drop(int(PlayerStats.s.level), 0.1, 2), player.global_position + player.facing * 1.2)
-			elif bc == "ready":
-				lines = [{"who": "Brann", "text": "Du kommst lebend aus der Gruft zurück? Respekt. Das hier hab ich für dich aufgehoben."}]
-				after = func():
-					PlayerStats.side_finish("brann_crypt")
-					PlayerStats.add_shards(120)
-					spawn_loot(Items.random_drop(int(PlayerStats.s.level) + 1, 0.2, 2), player.global_position + player.facing * 1.2)
-			elif st >= 8 and bc == "":
-				lines = [{"who": "Brann", "text": "Du gehst also wirklich da runter. Räum unten auf – zehn von den Biestern – und ich zahl dich gut."}]
-				after = func():
-					PlayerStats.side_start("brann_crypt")
-					_open_shop()
-			elif st >= 2 and bp == "":
-				lines = [
-					{"who": "Brann", "text": "Quartiermeister Brann. Ausrüstung gegen Blutsplitter – frag nicht, wofür ich die brauche."},
-					{"who": "Brann", "text": "Die Karkosa fressen mir das Lager leer. Vernichte fünfzehn von ihnen und ich lege was Gutes zurück."},
-				]
-				after = func():
-					PlayerStats.side_start("brann_pest")
-					_open_shop()
-			elif st == 7:
-				lines = [{"who": "Brann", "text": "Meine Karte! Behalt sie. Was da unten ist, will ich nicht wissen. Aber kauf vorher ein."}]
-				after = _open_shop
-			else:
-				lines = [{"who": "Brann", "text": ["Was darf's sein?", "Splitter auf den Tresen.", "Frische Ware, kaum Blut dran."][randi() % 3]}]
-				after = _open_shop
-	_cutscene_at(npc.global_position, lines, func():
-		npc.talking = false
-		after.call())
-
-func _open_shop() -> void:
-	hud.release_all()
-	menu.shop_open = true
-	menu.open("shop")
-	get_tree().paused = true
-
-# ---------- Kapitel 2 ----------
-
-func _use_lift(down: bool) -> void:
-	if not PlayerStats.s.get("lift_unlocked", false):
-		PlayerStats.system_message.emit("Gesperrt. Eine Zugangskarte wird benötigt.", "warn")
-		return
-	state = "cutscene"
-	hud.fade_t = 0.0
-	audio.play("awaken", -8.0, 0.0)
-	await get_tree().create_timer(0.45, true, false, true).timeout
-	var dest := Academy.CRYPT_LIFT + Vector3(0, 0, -2.2) if down else Academy.LIFT_POS + Vector3(-2.0, 0, 0)
-	player.global_position = dest
-	player.facing = Vector3(0, 0, -1) if down else Vector3(-1, 0, 0)
-	_cam_focus = dest
-	for e in ambient:
-		if is_instance_valid(e):
-			(e as Node).queue_free()
-	ambient.clear()
-	await get_tree().create_timer(0.5, true, false, true).timeout
-	state = "play"
-	if down and int(PlayerStats.s.story) == 7:
-		_cutscene_at(dest, [
-			{"who": "", "text": "Der Aufzug kreischt in die Tiefe. Kalte Luft, Kerzenwachs und der Geruch von altem Blut."},
-			{"who": "PROTOKOLL", "text": "Ich kenne diesen Ort. Hier unten liegen meine Erinnerungen verstreut. Sammle sie, Wirt."},
-		], func(): PlayerStats.set_story(8))
-
-func _touch_fragment(i: int) -> void:
-	var texts := [
-		"2071. Die Gründer öffnen das erste abgestürzte Karkosa-Schiff. In seinem Herzen pulsiert ein Organismus, der Blut in Macht verwandelt. Sie nennen ihn ‚Sanguine‘.",
-		"Der erste Wirt war ein Kadett wie du. Ungeformt, freiwillig. Er zerschlug eine ganze Karkosa-Brutflotte – und wurde danach nie wieder satt.",
-		"Sie versiegelten ihn hier unten und mich mit ihm. Doch die Karkosa fanden sein Blut. Sie bauten etwas daraus. Etwas, das brütet.",
-	]
-	var frags: Array = PlayerStats.s.fragments
-	if frags.has(i):
-		return
-	frags.append(i)
-	audio.play("awaken", -4.0, 0.0)
-	hud.red_flash = 0.5
-	_cutscene_at(Academy.FRAGMENTS[i], [
-		{"who": "SYSTEM", "text": "ERINNERUNGSFRAGMENT %d/3 SYNCHRONISIERT" % frags.size()},
-		{"who": "PROTOKOLL", "text": texts[i]},
-	], func():
-		PlayerStats.add_xp(120)
-		PlayerStats.story_advance_progress(8))
-
-func _chapter2_director() -> void:
-	var st := int(PlayerStats.s.story)
-	var z := academy.zone_at(player.global_position)
-	if st == 6 and z == "courtyard" and (butcher == null or not is_instance_valid(butcher)):
-		butcher = spawn_enemy("butcher", Academy.BUTCHER_POS + Vector3(0, 0, 5), max(3, int(PlayerStats.s.level) + 1))
-		butcher.aggro = false
-		butcher.died.connect(func(_e):
-			PlayerStats.s.lift_unlocked = true
-			PlayerStats.system_message.emit("Zugangskarte erhalten! Der alte Aufzug im Archiv ist frei.", "reward")
-			PlayerStats.story_advance_progress(6))
-		_cutscene_at(butcher.global_position, [
-			{"who": "", "text": "Zwischen den Bäumen richtet sich etwas Riesiges auf. An seinem Gürtel baumelt eine Zugangskarte."},
-			{"who": "SYSTEM", "text": "Warnung: Flächenangriff. Rote Kreise auf dem Boden zeigen den Einschlag – rechtzeitig wegdashen!"},
-		], func(): butcher.aggro = true)
-	if st == 9 and z == "brood" and (brood == null or not is_instance_valid(brood)):
-		brood = spawn_enemy("brood", Academy.BROOD_POS, max(5, int(PlayerStats.s.level) + 2))
-		brood.aggro = false
-		brood.died.connect(func(_e):
-			PlayerStats.story_advance_progress(9)
-			hud.show_banner("KAPITEL 2 ABGESCHLOSSEN")
-			audio.play("level", -2.0, 0.0)
-			PlayerStats.add_shards(150))
-		_cutscene_at(Academy.BROOD_POS, [
-			{"who": "", "text": "Die Kammer atmet. Aus dem Harz schält sich ein gewaltiger Leib mit glühenden Eiersäcken."},
-			{"who": "PROTOKOLL", "text": "Sie ist aus seinem Blut gewachsen. Aus meinem Blut. Beende es, Wirt."},
-		], func(): brood.aggro = true)
-
-# ---------- Effekt-Ressourcen ----------
-
-func _build_fx_assets() -> void:
-	_arc_mesh = _make_arc(1.1, 2.6, -1.25, 1.25, 18)
-	_ring_mesh = _make_arc(1.3, 2.3, 0.0, TAU, 40)
-	_ribbon_red = (Toon.holo(Color(1.0, 0.12, 0.22), 2.6, false, 0.0)).duplicate()
-	_ribbon_red.set_shader_parameter("ribbon", 1.0)
-	_ribbon_dark = (Toon.holo(Color(0.5, 0.1, 0.9), 1.8, false, 0.0)).duplicate()
-	_ribbon_dark.set_shader_parameter("ribbon", 1.0)
-
-func _make_arc(r0: float, r1: float, a0: float, a1: float, segs: int) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in segs:
-		var fa := float(i) / segs
-		var fb := float(i + 1) / segs
-		var aa := lerpf(a0, a1, fa)
-		var ab := lerpf(a0, a1, fb)
-		# Winkel 0 = vorne (−Z)
-		var pa0 := Vector3(sin(aa) * r0, 0, -cos(aa) * r0)
-		var pa1 := Vector3(sin(aa) * r1, 0, -cos(aa) * r1)
-		var pb0 := Vector3(sin(ab) * r0, 0, -cos(ab) * r0)
-		var pb1 := Vector3(sin(ab) * r1, 0, -cos(ab) * r1)
-		for q in [[pa0, Vector2(fa, 0)], [pa1, Vector2(fa, 1)], [pb1, Vector2(fb, 1)], [pa0, Vector2(fa, 0)], [pb1, Vector2(fb, 1)], [pb0, Vector2(fb, 0)]]:
-			st.set_uv(q[1])
-			st.add_vertex(q[0])
-	return st.commit()
-
-# ---------- Menü ----------
+func toggle_sense() -> void:
+	sense_on = not sense_on
+	sfx("perfect" if sense_on else "tick")
 
 func toggle_menu() -> void:
-	if state == "title":
+	if state == "title" or state == "loading":
 		return
 	if menu.visible:
 		menu.visible = false
-		menu.shop_open = false
 		get_tree().paused = false
 		PlayerStats.save_game()
 	else:
-		if hud.narrating() or state != "play":
+		if hud.in_dialog() or state != "play":
 			return
 		hud.release_all()
 		menu.open()
 		get_tree().paused = true
 	sfx("tick")
 
-# ---------- Sitzungsprotokoll (für Absturzberichte) ----------
+func open_shop() -> void:
+	hud.release_all()
+	menu.open("shop")
+	get_tree().paused = true
 
-func _read_session() -> Dictionary:
-	if not FileAccess.file_exists(SESSION_PATH):
-		return {}
-	var f := FileAccess.open(SESSION_PATH, FileAccess.READ)
-	if f == null:
-		return {}
-	var d = JSON.parse_string(f.get_as_text())
-	return d if typeof(d) == TYPE_DICTIONARY else {}
+func sleep_until(hour: int) -> void:
+	state = "talk"
+	hud.fade_t = 0.0
+	await get_tree().create_timer(0.5, true, false, true).timeout
+	var target := float(hour * 60)
+	var now := float(PlayerStats.s.minutes)
+	var passed := fmod(target - now + 24.0 * 60.0, 24.0 * 60.0)
+	if target <= now:
+		PlayerStats.s.day = int(PlayerStats.s.day) + 1
+	PlayerStats.s.minutes = target
+	PlayerStats.heal(9999.0)
+	PlayerStats.s.blood = maxf(0.0, float(PlayerStats.s.blood) - PlayerStats.blood_drain() * passed * 0.25)
+	_check_events()
+	PlayerStats.save_game()
+	await get_tree().create_timer(0.5, true, false, true).timeout
+	state = "play"
+	PlayerStats.system_message.emit("Du hast geschlafen. %s." % PlayerStats.clock_text(), "sys")
 
-func _write_session(clean: bool) -> void:
-	var f := FileAccess.open(SESSION_PATH, FileAccess.WRITE)
-	if f == null:
+func show_chronicle() -> void:
+	var lines: Array = []
+	for c in PlayerStats.s.choices:
+		lines.append(c.text)
+	hud.show_chronicle(lines)
+	state = "talk"
+	await get_tree().create_timer(4.0 + lines.size() * 0.6, true, false, true).timeout
+	hud.chronicle_t = -1.0
+	state = "play"
+
+# ---------- Trinken ----------
+
+func witnesses(at: Vector3, exclude: Node = null) -> Array:
+	var out: Array = []
+	for id in npcs:
+		var n: HumanNpc = npcs[id]
+		if n == exclude or not is_instance_valid(n) or not n.alive or n.asleep or n.downed:
+			continue
+		if n.global_position.distance_to(at) < 15.0 and n.can_see(at, 15.0, -0.35):
+			out.append(n)
+	return out
+
+func _feed_prompt(a: Actor) -> void:
+	var name := a.display_name
+	var lines: Array = []
+	var choices: Array = []
+	var info := a.feed_info()
+	if a is Animal:
+		perform_feed(a, "drain", false)
 		return
-	f.store_string(JSON.stringify({
-		"clean": clean, "uptime": _session_t, "state": state, "story": int(PlayerStats.s.get("story", 0)),
-		"fps": Engine.get_frames_per_second(), "nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
-		"mem_mb": snappedf(OS.get_static_memory_usage() / 1048576.0, 0.1),
-		"enemies": get_tree().get_nodes_in_group("enemies").size() if is_inside_tree() else 0,
-		"renderer": RenderingServer.get_current_rendering_method(), "gpu": RenderingServer.get_video_adapter_name(),
-		"device": OS.get_model_name(), "os": OS.get_name() + " " + OS.get_version(),
-	}))
+	var wit := witnesses(player.global_position, a)
+	var warn := "" if wit.is_empty() else "  %d Zeuge(n) sehen dich!" % wit.size()
+	if a is HumanNpc:
+		var hn := a as HumanNpc
+		if hn.asleep:
+			lines.append({"who": "", "text": "%s schläft. Der Herzschlag ist langsam und warm.%s" % [name, warn]})
+		elif hn.role == "prisoner":
+			lines.append({"who": "", "text": "%s weicht an die Gitter zurück. Er kann nirgendwohin.%s" % [name, warn]})
+		elif hn.downed:
+			lines.append({"who": "", "text": "%s liegt am Boden und fleht.%s" % [name, warn]})
+		else:
+			lines.append({"who": "", "text": "%s bemerkt dich. Wenn du jetzt trinkst, wird %s dein Gesicht kennen.%s" % [name, name, warn]})
+		choices = ["Nippen – %s überlebt" % name, "[Aussaugen] %s stirbt" % name, "Lass es"]
+	else:
+		lines.append({"who": "", "text": "%s kniet blutend vor dir.%s" % [name, warn]})
+		choices = ["Nippen und laufen lassen", "[Aussaugen]", "Hinrichten", "Lass es"]
+	lines.append({"who": "DIE ERSTE NACHT", "text": ["Trink.", "Nimm, was dir zusteht.", "Wer wird es je erfahren?", "Du zitterst. Warum?"][randi() % 4]})
+	begin_talk(a if a is HumanNpc else null)
+	hud.dialog(lines, choices, func(i):
+		end_talk()
+		var c: String = choices[i] if i >= 0 else ""
+		if c.begins_with("Nippen"):
+			perform_feed(a, "sip", false)
+		elif c.begins_with("[Aussaugen]"):
+			perform_feed(a, "drain", false)
+		elif c == "Hinrichten":
+			a.die()
+			PlayerStats.record_choice("Du hast %s hingerichtet." % name) if a is Enemy and (a as Enemy).is_boss() else null)
 
-func _copy_report() -> void:
-	var txt := "Sanguine Protocol – Fehlerbericht\n" + JSON.stringify(_prev_session, "  ") + "\n\n"
-	# vorheriges Godot-Log (das neueste außer dem aktuellen)
-	var logs := DirAccess.get_files_at("user://logs")
-	var files: Array = []
-	for fn in logs:
-		if fn.ends_with(".log") and fn != "godot.log":
-			files.append(fn)
-	files.sort()
-	if files.size() > 0:
-		var f := FileAccess.open("user://logs/" + String(files[-1]), FileAccess.READ)
-		if f:
-			var lines := f.get_as_text().split("\n")
-			txt += "--- " + String(files[-1]) + " ---\n" + "\n".join(lines.slice(max(0, lines.size() - 60)))
-	DisplayServer.clipboard_set(txt)
-	PlayerStats.system_message.emit("Fehlerbericht kopiert – einfach im Chat einfügen.", "sys")
+func perform_feed(a: Actor, mode: String, scripted: bool) -> void:
+	var info := a.feed_info()
+	var wit: Array = [] if scripted else witnesses(player.global_position, a)
+	state = "talk"
+	player.busy = true
+	var to := a.global_position - player.global_position
+	to.y = 0
+	if to.length() > 0.01:
+		player.facing = to.normalized()
+	player.model.play("feed")
+	if a is HumanNpc:
+		var hn := a as HumanNpc
+		if not hn.asleep and hn.role != "wounded":
+			(hn.model as Humanoid).play("kneel")
+	audio.play("drink", 0.0, 0.0)
+	hud.red_flash = 0.6
+	for k in 3:
+		await get_tree().create_timer(0.5, true, false, true).timeout
+		blood_hit(a, player.global_position, false)
+	var gained := PlayerStats.feed(info, mode)
+	PlayerStats.system_message.emit("+%d Blut" % int(gained), "blood")
+	player.model.play("")
+	player.busy = false
+	state = "play"
+	var aware := a is HumanNpc and (a as HumanNpc).aware_of(player.global_position) and not scripted
+	if mode == "drain":
+		if a is Animal:
+			if a.alive:
+				a.die()
+			a.set_meta("fed", true)
+		else:
+			a.die()
+			if a is HumanNpc and not scripted and a.npc_id != "jory":
+				PlayerStats.record_choice("Du hast %s ausgesaugt." % a.display_name)
+	else:
+		if a is HumanNpc:
+			var hn := a as HumanNpc
+			if aware:
+				PlayerStats.set_flag("saw_" + hn.npc_id)
+				PlayerStats.system_message.emit("%s hat dein Gesicht gesehen." % hn.display_name, "choice")
+				hn.frighten(player.global_position)
+			elif hn.asleep:
+				(hn.model as Humanoid).play("sleep")
+				PlayerStats.system_message.emit("%s träumt schlecht – mehr nicht." % hn.display_name, "mini")
+		elif a is Enemy:
+			(a as Enemy).spare()
+	if a.npc_id == "jory":
+		story.jory_fed(mode)
+	if not wit.is_empty() and a.kind == "human" and (a.faction == "village"):
+		_village_alarm("Asch-Furt hat gesehen, was du bist.")
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
-		_write_session(true)
-	elif what == NOTIFICATION_APPLICATION_RESUMED:
-		_write_session(false)
-	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
-		if state == "play" or menu.visible:
-			toggle_menu()
+func _village_alarm(text: String) -> void:
+	if PlayerStats.flag("village_hostile"):
+		return
+	PlayerStats.set_flag("village_hostile")
+	PlayerStats.record_choice("Asch-Furt hat dich als Blutgeborenen erkannt. Das Dorf ist dir verschlossen.")
+	PlayerStats.system_message.emit(text, "warn")
+	hud.show_banner("ENTDECKT")
+	for id in npcs:
+		var n: HumanNpc = npcs[id]
+		if is_instance_valid(n) and n.alive:
+			n.wake_up()
+			n.frighten(player.global_position)
+
+func on_villager_attacked(n: HumanNpc) -> void:
+	if not witnesses(player.global_position, n).is_empty() or n.role == "guard":
+		_village_alarm("Du hast einen Bewohner von Asch-Furt angegriffen.")
+
+func on_villager_killed(n: HumanNpc) -> void:
+	if n.npc_id == "tamas" or n.npc_id == "tamas_body":
+		return
+	PlayerStats.set_flag("murders", int(PlayerStats.flag("murders", 0)) + 1)
+	if n.npc_id == "jory" and PlayerStats.flag("jory", "") == "":
+		story.jory_fed("drain")
+
+func on_enemy_downed(e: Enemy) -> void:
+	if e.npc_id == "krahe":
+		story.krahe_downed(e)
+
+func on_enemy_alerted(e: Enemy) -> void:
+	if e.faction == "wacht" and not PlayerStats.flag("wacht_recognized"):
+		PlayerStats.set_flag("wacht_recognized")
+		story.say([{"who": "Soldat der Wacht", "text": "Halt! … Kael? Du bist tot! Varek hat dich selbst …"},
+			{"who": "Soldat der Wacht", "text": "Deserteur! Zu den Waffen!"}], [], Callable())
+		PlayerStats.record_choice("Die Wacht hat dich gesehen. Varek wird erfahren, dass du lebst.")
+
+func on_enemy_killed(e: Enemy) -> void:
+	var lvl := e.level
+	var sh: int = int(e.cfg.get("shards", 2)) + randi() % 3
+	PlayerStats.add_shards(sh)
+	PlayerStats.register_kill("beast" if e.kind == "beast" else ("wacht" if e.faction == "wacht" else "bandit"), int(e.cfg.xp) + lvl * 4, e.npc_id, e.innocent)
+	splat(e.global_position, Color(0.5, 0.02, 0.05) if e.kind == "human" else Color(0.35, 0.1, 0.4), randf_range(1.2, 1.8))
+	if e.is_boss():
+		_slow_until = Time.get_ticks_msec() + 1200
+		_slow_scale = 0.25
+		hud.show_banner("%s BESIEGT" % e.display_name.to_upper())
+		spawn_loot(Items.random_drop(lvl + 1, 0.15, 2), e.global_position)
+	elif randf() < (0.25 if e.kind == "human" else 0.1):
+		spawn_loot(Items.random_drop(lvl), e.global_position)
+	if e.kind == "beast" and randf() < 0.5:
+		PlayerStats.pick_vial("beast")
+
+# ---------- Interaktion ----------
+
+func _set_interact(id: String, text: String, target: Node3D = null, warn := "") -> void:
+	interact_id = id
+	interact_target = target
+	hud.interact_text = text
+	hud.interact_warn = warn
+
+func _update_interact() -> void:
+	_set_interact("", "")
+	if state != "play" or player.dead or player.busy:
+		return
+	var pp := player.global_position
+	var fwd := rig.forward_flat() if rig.first_person else player.facing
+	# Trinken / Reden – nächstes Wesen vor dir
+	var best: Actor = null
+	var bd := 2.4
+	for e in get_tree().get_nodes_in_group("living"):
+		var a := e as Actor
+		if a == null or a._far:
+			continue
+		var d := a.global_position - pp
+		d.y = 0
+		var l := d.length()
+		if l < bd and (l < 0.9 or fwd.dot(d / l) > 0.2):
+			if a.feedable() or (a is HumanNpc and a.alive):
+				best = a
+				bd = l
+	if best:
+		if best is HumanNpc:
+			var hn := best as HumanNpc
+			var can_talk := not hn.asleep and not hn.downed and hn.alive and hn.fear_t <= 0.0
+			if hn.role == "wounded" and hn.npc_id == "tamas" and PlayerStats.flag("tamas", "") == "":
+				_set_interact("tamas", "VERWUNDETEN ANSPRECHEN", hn)
+				return
+			if can_talk and hn.role != "wounded":
+				var wit := witnesses(pp, hn)
+				_set_interact("talk", "MIT %s SPRECHEN" % hn.display_name.to_upper(), hn)
+				if not hn.aware_of(pp) or hn.role == "prisoner":
+					_set_interact("feed", "TRINKEN", hn, ("%d ZEUGE(N)" % wit.size()) if not wit.is_empty() else "")
+					if hn.role == "prisoner":
+						_set_interact("talk_or_feed", "MIT JORY SPRECHEN", hn)
+				return
+			if hn.feedable() and PlayerStats.s.started:
+				var wit2 := witnesses(pp, hn)
+				_set_interact("feed", "TRINKEN", hn, ("%d ZEUGE(N)" % wit2.size()) if not wit2.is_empty() else ("SCHLÄFT" if hn.asleep else ""))
+				return
+		elif best.feedable():
+			_set_interact("feed", "TRINKEN" if best is Animal else "ÜBERWÄLTIGT", best)
+			return
+	var sp: Dictionary = places.spots
+	if int(PlayerStats.s.story) == 3 and not PlayerStats.flag("jory_resolved") and npcs.has("jory") and is_instance_valid(npcs.jory) and npcs.jory.alive:
+		if pp.distance_to(sp.cage + Vector3(1.4, 0, 0)) < 1.6:
+			_set_interact("cage", "KÄFIG ÖFFNEN", null, "Lenz sieht zu!" if _guard_watching() else "")
+			return
+	if pp.distance_to(sp.bandit_chest) < 1.8 and not PlayerStats.flag("chest_open"):
+		_set_interact("chest", "TRUHE ÖFFNEN")
+		return
+	if int(PlayerStats.s.story) == 4 and pp.distance_to(sp.ruin_altar) < 3.0:
+		_set_interact("finale", "DAS HERZ BERÜHREN")
+		return
+	if pp.distance_to(sp.shrine) < 3.0 and not PlayerStats.flag("shrine_read"):
+		_set_interact("shrine", "SCHREIN UNTERSUCHEN")
+		return
+	if pp.distance_to(sp.lander) < 6.0 and not PlayerStats.flag("lander_read"):
+		_set_interact("lander", "WRACK DURCHSUCHEN")
+		return
+	if sp.has("obelisks"):
+		for i in (sp.obelisks as Array).size():
+			if pp.distance_to(sp.obelisks[i]) < 2.4 and not PlayerStats.flag("obelisk_%d" % i):
+				_set_interact("obelisk:%d" % i, "GLYPHEN BERÜHREN")
+				return
+
+func _guard_watching() -> bool:
+	if not npcs.has("lenz") or not is_instance_valid(npcs.lenz):
+		return false
+	var l: HumanNpc = npcs.lenz
+	return l.alive and not l.asleep and l.can_see(player.global_position, 16.0, -0.4)
+
+func _interact() -> void:
+	match interact_id:
+		"talk", "talk_or_feed":
+			_talk(interact_target as HumanNpc)
+		"tamas":
+			story.tamas_encounter(interact_target as HumanNpc)
+		"feed":
+			_feed_prompt(interact_target as Actor)
+		"cage":
+			try_free_jory()
+		"chest":
+			PlayerStats.set_flag("chest_open")
+			PlayerStats.set_flag("has_amulet")
+			PlayerStats.add_shards(45)
+			spawn_loot(Items.random_drop(int(PlayerStats.s.level) + 1, 0.1, 1), places.spots.bandit_chest + Vector3(1.2, 0, 0))
+			story.say([{"who": "", "text": "Unter gestohlenem Saatgut liegt ein Silberamulett. Eingraviert: „Für Edrik, in Liebe“."}])
+			PlayerStats.system_message.emit("Edriks Amulett erhalten.", "reward")
+		"finale":
+			story.finale()
+		"shrine":
+			PlayerStats.set_flag("shrine_read")
+			PlayerStats.add_xp(80)
+			story.say([{"who": "", "text": "In der Opferschale schwimmt frisches Blut. Daneben ein Zeichen: zwei verschlungene Schlangen – rot und schwarz."},
+				{"who": "DIE ERSTE NACHT", "text": "Meine Kinder. Sie warten seit Jahrhunderten auf jemanden wie dich. Sie werden dich finden."},
+				{"who": "SYSTEM", "text": "Fraktion entdeckt: Der Kult der Ersten Nacht."}])
+		"lander":
+			PlayerStats.set_flag("lander_read")
+			PlayerStats.add_xp(60)
+			spawn_loot(Items.random_drop(int(PlayerStats.s.level), 0.1, 1), places.spots.lander + Vector3(2, 0, 2))
+			story.say([{"who": "", "text": "Ein Logbuch, halb verbrannt: „Tag 1 nach dem Schleier. Wir versuchen, durchzubrechen. Die Instrumente zeigen … etwas Lebendiges. Es atmet.“"}])
+		_:
+			if interact_id.begins_with("obelisk:"):
+				var i := int(interact_id.substr(8))
+				PlayerStats.set_flag("obelisk_%d" % i)
+				PlayerStats.add_xp(50)
+				var lore := [
+					"Die Alten nannten diese Welt nicht Veyra. Sie nannten sie „Wiege“. Und was sie wiegte, schlief.",
+					"Fünf Steine. Fünf Wächter. Einer nach dem anderen fiel. Der Schlaf wurde leichter.",
+					"Wer von der Ersten Nacht trinkt, bekommt ihre Kraft. Wer zu viel trinkt, wird sie.",
+					"Der Schleier ist kein Sturm. Er ist eine Haut. Und darunter wächst etwas.",
+					"Die Alten haben die Wiege nicht verlassen. Sie sind noch hier. In jedem Stein. In jedem Tropfen.",
+				]
+				story.say([{"who": "", "text": "Die Glyphen glühen auf, als du sie berührst."}, {"who": "DIE ERSTE NACHT", "text": lore[i % lore.size()]}])
+				hud.red_flash = 0.4
+
+func _talk(n: HumanNpc) -> void:
+	if n == null or not is_instance_valid(n):
+		return
+	match n.npc_id:
+		"hanna":
+			story.hanna(n)
+		"lenz":
+			if not PlayerStats.flag("guard_met"):
+				story.guard_greet(n)
+			else:
+				story.generic(n)
+		"jory":
+			story.jory(n)
+		"tamas":
+			story.say([{"who": "Tamas", "text": "Danke noch mal, Fremder." if PlayerStats.flag("tamas", "") == "helped" else "Bleib weg von mir! Ich weiß, was du bist!"}], [], Callable(), n)
+		"mara":
+			story.mara(n)
+		"greta":
+			story.innkeeper(n)
+		"oswin":
+			story.smith(n)
+		"pip":
+			story.child(n)
+		_:
+			story.generic(n)
+
+func try_free_jory() -> void:
+	if _guard_watching():
+		PlayerStats.system_message.emit("Lenz sieht dich. Nicht jetzt – warte auf die Nacht oder lenk ihn ab.", "warn")
+		return
+	if PlayerStats.night < 0.5:
+		PlayerStats.system_message.emit("Am helllichten Tag? Zu viele Augen. Komm nachts wieder.", "warn")
+		return
+	var wit := witnesses(player.global_position, npcs.get("jory"))
+	free_jory_npc(true)
+	story.jory_freed_secretly()
+	if not wit.is_empty():
+		_village_alarm("Man hat gesehen, wie du Jory befreit hast.")
+
+func free_jory_npc(flee: bool) -> void:
+	if places.cage_door:
+		var tw := create_tween()
+		tw.tween_property(places.cage_door, "rotation:y", 1.8, 0.6)
+		var body := places.cage_door.get_node_or_null("Body")
+		if body:
+			body.queue_free()
+	if npcs.has("jory") and is_instance_valid(npcs.jory):
+		var j: HumanNpc = npcs.jory
+		j.role = "villager"
+		j.state = "work"
+		(j.model as Humanoid).play("")
+		if flee:
+			j.work_spot = terrain.ground(Vector3(-60, 0, 100))
+			j.frighten(player.global_position)
+			j.fear_t = 30.0
+			j.set_meta("leaving", true)
+		else:
+			j.work_spot = places.spots.village + Vector3(-6, 0, -4)
 
 # ---------- Ablauf ----------
 
 func _process(delta: float) -> void:
+	if state == "loading":
+		return
 	var now := Time.get_ticks_msec()
 	var ts := 1.0
 	if now < _slow_until:
 		ts = _slow_scale
 	if death_t >= 0.0:
-		ts = min(ts, 0.35)
+		ts = minf(ts, 0.4)
 	if now < _hitstop_until:
 		ts = 0.06
 	Engine.time_scale = ts
 	var rd := delta / maxf(ts, 0.01)
-	_session_t += rd
-	if _session_t - _session_last > 2.0:
-		_session_last = _session_t
-		_write_session(false)
-	if _eclipse_t > 0.0:
-		_eclipse_t -= delta
-	PlayerStats.paused_world = state != "play" or hud.narrating() or player.dead
-	player.input_dir = hud.move_input() if not input_locked() else Vector2.ZERO
+	PlayerStats.paused_world = state != "play" or player.dead
+	daynight.minutes = float(PlayerStats.s.minutes)
+	daynight.update(delta)
+	PlayerStats.night = daynight.night
+	places.tick(delta, daynight.night)
 	if state == "title":
-		_title_t += rd
-		var a := _title_t * 0.15
-		_cam_focus = Academy.RELIC_POS + Vector3(0, 1.0, 0)
-		camera.global_position = _cam_focus + Vector3(sin(a) * 7.5, 3.4, cos(a) * 7.5)
-		camera.look_at(_cam_focus, Vector3.UP)
-	else:
-		_update_camera(delta, rd)
-	Toon.update_fade(player.global_position, camera.global_position)
-	if state == "title":
+		# Kamerafahrt über die Ruine
+		var a := Time.get_ticks_msec() * 0.00005
+		rig.cutscene = true
+		rig.cut_from = places.spots.ruin_altar + Vector3(sin(a) * 16.0, 7.0, cos(a) * 16.0)
+		rig.cut_at = places.spots.ruin_altar + Vector3(0, 2.0, 0)
 		return
+	rig.cutscene = false
+	player.input_dir = hud.move_input() if not input_locked() else Vector2.ZERO
+	var look := hud.take_look()
+	if look != Vector2.ZERO and not input_locked():
+		rig.look(look)
+	_update_indoor()
+	_update_sun(delta)
+	_update_sense(delta, rd)
 	_update_interact()
-	_update_zone()
-	_update_capsules(delta)
-	_update_spits(delta)
-	_update_fx(delta, rd)
+	_update_zone(delta)
+	_update_compass()
 	_update_loot(delta)
+	_update_bolts(delta)
+	_update_fx(delta, rd)
 	_update_decals(delta)
-	_update_npc_markers()
-	_director(delta)
-	_check_midnight()
+	_director_t -= delta
+	if _director_t <= 0.0:
+		_director_t = 1.0
+		_director()
+	if PlayerStats.s.started and Engine.get_frames_drawn() % 30 == 0:
+		var p := player.global_position
+		PlayerStats.s.pos = [p.x, p.y, p.z]
 	if death_t >= 0.0:
 		death_t += rd
-		if death_t > 3.2:
+		if death_t > 3.4:
 			_respawn()
 
-func _update_camera(delta: float, rd: float) -> void:
-	var target := player.global_position + player.facing * 0.8
-	var dist := 1.0
-	if state == "cutscene":
-		target = _cut_focus
-		dist = 0.62
-	_cam_focus = _cam_focus.lerp(target, clamp(rd * 5.0, 0.0, 1.0))
-	_cam_dist = lerpf(_cam_dist, dist, clamp(rd * 2.0, 0.0, 1.0))
-	var off := Vector3(0, 10.4, 7.3) * _cam_dist
-	var sh := Vector3.ZERO
-	if _shake > 0.0:
-		sh = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * _shake * 0.35
-		_shake = max(0.0, _shake - rd * 2.5)
-	camera.global_position = _cam_focus + off + sh
-	camera.look_at(_cam_focus + Vector3(0, 0.6, 0) + sh * 0.5, Vector3.UP)
-
-func _update_zone() -> void:
-	var z := academy.zone_at(player.global_position)
-	if z != "" and z != last_zone:
-		last_zone = z
-		hud.show_zone(Academy.ZONE_NAMES[z])
-		if z == "hall" and int(PlayerStats.s.story) == 2 and not hall_greeted and drax and is_instance_valid(drax):
-			hall_greeted = true
-			drax.aggro = false
-			_cutscene_at(drax.global_position, [
-				{"who": "Drax", "text": "Sieh an – Subjekt Null kriecht aus den Ruinen. Du riechst nach Blut … ist das deins?"},
-				{"who": "Drax", "text": "Heute bringen wir zu Ende, was wir im Archiv angefangen haben. Packt ihn!"},
-				{"who": "SYSTEM", "text": "Menschliches Blut stellt am meisten her und gibt viel EXP. Es erhöht aber den Verdacht der Akademie."},
-			], func():
-				for e in get_tree().get_nodes_in_group("enemies"):
-					if academy.zone_at((e as Node3D).global_position) == "hall":
-						(e as Enemy).aggro = true)
-
-func _update_interact() -> void:
-	interact_id = ""
-	hud.interact_text = ""
-	if state != "play" or player.dead:
-		return
+func _update_indoor() -> void:
+	var inside := false
 	var pp := player.global_position
-	for id in npcs:
-		var npc: Npc = npcs[id]
-		if pp.distance_to(npc.global_position) < npc.talk_range:
-			interact_id = "npc:" + id
-			hud.interact_text = "MIT %s SPRECHEN" % npc.display.to_upper()
-			return
-	if pp.distance_to(Academy.LIFT_POS) < 1.8:
-		interact_id = "lift_down"
-		hud.interact_text = "AUFZUG: KATAKOMBEN" if PlayerStats.s.lift_unlocked else "AUFZUG (GESPERRT)"
+	for hs in places.spots.get("houses", []):
+		var r: Array = hs.rect
+		var local := (pp - (r[0] as Vector3)).rotated(Vector3.UP, -float(r[1]))
+		if absf(local.x) < float(r[2]) * 0.5 and absf(local.z) < float(r[3]) * 0.5:
+			inside = true
+	if inside and not rig.first_person:
+		_forced_fp = true
+		rig.set_first_person(true)
+		player.set_first_person(true)
+	elif not inside and _forced_fp:
+		_forced_fp = false
+		rig.set_first_person(false)
+		player.set_first_person(false)
+	player.set_meta("indoor", inside)
+	# Kamera klebt an einer Wand: Figur ausblenden statt durch den Kopf zu schauen
+	var hide := rig.first_person or (rig.arm.get_hit_length() < 1.1 and not rig.cutscene)
+	if hide != _model_hidden:
+		_model_hidden = hide
+		player.model.set_shadow_only(hide)
+
+func _update_sun(delta: float) -> void:
+	var exposure := 0.0
+	if daynight.daylight > 0.05 and not player.get_meta("indoor", false) and PlayerStats.s.started and state == "play":
+		var sun_dir := -daynight.sun.global_transform.basis.z
+		var from := player.global_position + Vector3(0, 1.6, 0)
+		var q := PhysicsRayQueryParameters3D.create(from, from - sun_dir * 60.0, 1)
+		q.exclude = [player.get_rid()]
+		var shaded := not get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+		# Baumkronen spenden Schatten (Stämme sind Kollision, Kronen nicht): Wald-Rauschen als Näherung
+		var p := player.global_position
+		if veg.forest.get_noise_2d(p.x, p.z) > 0.12:
+			shaded = true
+		exposure = 0.0 if shaded else daynight.daylight
+	PlayerStats.in_sun = exposure
+	hud.sun_burn = lerpf(hud.sun_burn, exposure * clampf(PlayerStats.sun_dps() / 4.0, 0.15, 1.0), minf(1.0, delta * 3.0))
+	if exposure > 0.3 and PlayerStats.sun_dps() > 2.0 and Engine.get_frames_drawn() % 50 == 0:
+		burst(player.global_position + Vector3(0, 1.2, 0), Color(1.0, 0.55, 0.2), 0.4)
+
+func _update_sense(delta: float, rd: float) -> void:
+	_sense_amt = move_toward(_sense_amt, 1.0 if sense_on else 0.0, rd * 3.0)
+	sense_rect.visible = _sense_amt > 0.01
+	if sense_rect.visible:
+		(sense_rect.material as ShaderMaterial).set_shader_parameter("amount", _sense_amt)
+	# Herzschläge als leuchtende Punkte (durch Wände sichtbar)
+	if _sense_amt > 0.01:
+		var need: Array = []
+		for e in get_tree().get_nodes_in_group("living"):
+			var a := e as Actor
+			if a.alive and a.global_position.distance_to(player.global_position) < 45.0:
+				need.append(a)
+		while heartbeats.size() < need.size():
+			var s := Sprite3D.new()
+			var img := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+			for y in 32:
+				for x in 32:
+					var d := Vector2(x - 15.5, y - 15.5).length() / 16.0
+					img.set_pixel(x, y, Color(1, 1, 1, clampf(1.0 - d, 0.0, 1.0) ** 2))
+			s.texture = ImageTexture.create_from_image(img)
+			s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			s.no_depth_test = true
+			s.shaded = false
+			s.pixel_size = 0.05
+			s.render_priority = 5
+			add_child(s)
+			heartbeats.append(s)
+		for i in heartbeats.size():
+			var s: Sprite3D = heartbeats[i]
+			if i < need.size():
+				var a: Actor = need[i]
+				s.visible = true
+				s.global_position = a.global_position + Vector3(0, a._height() * 0.7, 0)
+				var beat := 1.0 + 0.35 * maxf(0.0, sin(Time.get_ticks_msec() * 0.008 + i))
+				var col := Color(1.0, 0.15, 0.2)
+				if a.kind == "animal":
+					col = Color(1.0, 0.55, 0.3)
+				elif a.kind == "beast":
+					col = Color(0.75, 0.3, 1.0)
+				elif a is HumanNpc and (a as HumanNpc).asleep:
+					col = Color(1.0, 0.85, 0.5)
+				s.modulate = Color(col, _sense_amt * 0.9)
+				s.scale = Vector3.ONE * beat * (0.8 if a.kind == "animal" else 1.0)
+			else:
+				s.visible = false
+	else:
+		for s in heartbeats:
+			s.visible = false
+
+func _update_zone(delta: float) -> void:
+	_zone_t -= delta
+	if _zone_t > 0.0:
 		return
-	if pp.distance_to(Academy.CRYPT_LIFT) < 1.8:
-		interact_id = "lift_up"
-		hud.interact_text = "AUFZUG: ARCHIV"
-		return
-	if int(PlayerStats.s.story) == 8:
-		for i in Academy.FRAGMENTS.size():
-			if not (PlayerStats.s.fragments as Array).has(i) and pp.distance_to(Academy.FRAGMENTS[i]) < 2.0:
-				interact_id = "frag:%d" % i
-				hud.interact_text = "ERINNERUNG BERÜHREN"
-				return
-	if player.global_position.distance_to(Academy.RELIC_POS) < 3.0:
-		var st := int(PlayerStats.s.story)
-		if st == 0:
-			interact_id = "awaken"
-			hud.interact_text = "RELIKT BERÜHREN"
-		elif st == 4:
-			interact_id = "relic_talk"
-			hud.interact_text = "MIT DEM PROTOKOLL SPRECHEN"
-		else:
-			interact_id = "rest"
-			hud.interact_text = "AM RELIKT RUHEN"
-
-func _interact() -> void:
-	if interact_id.begins_with("npc:"):
-		_talk(interact_id.substr(4))
-		return
-	if interact_id.begins_with("frag:"):
-		_touch_fragment(int(interact_id.substr(5)))
-		return
-	match interact_id:
-		"lift_down":
-			_use_lift(true)
-		"lift_up":
-			_use_lift(false)
-		"awaken":
-			_awaken()
-		"relic_talk":
-			_cutscene_at(Academy.RELIC_POS, [
-				{"who": "PROTOKOLL", "text": "Das Nest ist verbrannt. Gut. Die Karkosa haben dich gerochen, Wirt – so wie ich dich gerochen habe."},
-				{"who": "PROTOKOLL", "text": "Ich wurde erschaffen, um gegen sie zu kämpfen. Von denen, die diese Akademie gegründet haben."},
-				{"who": "PROTOKOLL", "text": "Sie haben mich begraben, als ihre Wirte zu hungrig wurden. Frag dich, warum – und wer sich noch erinnert."},
-				{"who": "SYSTEM", "text": "Kapitel 1 abgeschlossen. Tägliche Quests, verborgene Quests und die Jagd gehen weiter."},
-			], func():
-				PlayerStats.set_story(5)
-				hud.show_banner("KAPITEL 1 ABGESCHLOSSEN")
-				audio.play("level", -2.0, 0.0))
-		"rest":
-			for e in get_tree().get_nodes_in_group("enemies"):
-				var en := e as Enemy
-				if en.aggro and en.state != "dead" and en.global_position.distance_to(player.global_position) < 14.0:
-					PlayerStats.system_message.emit("Nicht möglich – Feinde in der Nähe.", "warn")
-					return
-			PlayerStats.heal(9999.0)
-			PlayerStats.save_game()
-			burst(player.global_position + Vector3(0, 1, 0), H.CYAN, 1.0)
-			PlayerStats.system_message.emit("HP wiederhergestellt. Fortschritt gesichert. (Blut regeneriert sich nicht.)", "sys")
-
-func _cutscene_at(focus: Vector3, lines: Array, after: Callable) -> void:
-	state = "cutscene"
-	_cut_focus = focus
-	hud.narrate(lines)
-	_after_narration = after
-
-func _on_narration_done() -> void:
-	if state == "cutscene":
-		state = "play"
-	if _after_narration.is_valid():
-		var cb := _after_narration
-		_after_narration = Callable()
-		cb.call()
-
-func _awaken() -> void:
-	state = "cutscene"
-	_cut_focus = Academy.RELIC_POS
-	audio.play("awaken", 0.0, 0.0)
-	shake(0.8)
-	hud.red_flash = 1.0
-	burst(Academy.RELIC_POS + Vector3(0, 1.5, 0), Toon.RED, 2.5)
-	hud.narrate([
-		{"who": "", "text": "Deine aufgeschürfte Hand streift die Dornen des Relikts. Ein Tropfen Blut fällt auf das pulsierende Herz."},
-		{"who": "SYSTEM", "text": "Blutsignatur erkannt … Wirt kompatibel."},
-		{"who": "SYSTEM", "text": "Sanguine-Protokoll wird initialisiert … 12 % … 47 % … 100 %."},
-		{"who": "PROTOKOLL", "text": "Willkommen, Wirt. Du warst schwach. Das endet jetzt."},
-		{"who": "PROTOKOLL", "text": "Meine Bedingung: Deine Lebensenergie zehrt von Blut. Versiegt dein Blut, verzehrst du dich selbst."},
-		{"who": "SYSTEM", "text": "Freigeschaltet: Schatten-Dash, Blutsichel, Status-Interface. Attribute: STR · AGI · END · SHD."},
-	])
-	_after_narration = func():
-		PlayerStats.s.awakened = true
-		PlayerStats.s.inventory.karkosa = int(PlayerStats.s.inventory.karkosa) + 1
-		player.refresh_awakening()
-		hud.show_banner("SANGUINE-PROTOKOLL AKTIV")
-		audio.play("boom", 0.0, 0.0)
-		burst(player.global_position + Vector3(0, 1, 0), Toon.RED, 2.0)
-		PlayerStats.set_story(1)
-		PlayerStats.system_message.emit("Startreserve: +1 Karkosa-Blut. Trinken mit dem Tropfen-Knopf.", "blood")
-		PlayerStats.system_message.emit("Karkosa durchbrechen die Nordwand!", "warn")
-		shake(0.6)
-
-# ---------- Story-Regie ----------
-
-func _sync_story() -> void:
-	if state == "title":
-		return
+	_zone_t = 0.5
+	var p := Vector2(player.global_position.x, player.global_position.z)
+	var z := ""
+	for zn in ZONES:
+		if p.distance_to(zn[2]) < float(zn[3]):
+			z = zn[0]
+			if z != last_zone:
+				hud.show_zone(zn[1])
+				if PlayerStats.s.started:
+					PlayerStats.discover(z, zn[1])
+			break
+	last_zone = z
+	# Story-Auslöser
 	var st := int(PlayerStats.s.story)
-	if st >= 2 and (drax == null or not is_instance_valid(drax)) and st == 2:
-		drax = spawn_enemy("drax", Academy.DRAX_POS, max(2, int(PlayerStats.s.level)))
-		drax.rotation.y = PI * 0.5
-		drax.died.connect(func(_e):
-			PlayerStats.story_advance_progress(2)
-			PlayerStats.system_message.emit("Drax liegt am Boden. Die Rangordnung hat sich verschoben.", "quest"))
-		for p in [Academy.DRAX_POS + Vector3(-2.2, 0, 1.5), Academy.DRAX_POS + Vector3(2.2, 0, 1.5)]:
-			spawn_enemy("cadet", p, max(1, int(PlayerStats.s.level) - 1))
-	if st == 3 and (nest == null or not is_instance_valid(nest)):
-		nest = spawn_enemy("nest", Academy.NEST_POS, max(2, int(PlayerStats.s.level)))
-		nest.died.connect(func(_e):
-			PlayerStats.story_advance_progress(3)
-			shake(1.0)
-			audio.play("boom", 0.0, 0.0)
-			PlayerStats.system_message.emit("Das Nest ist zerstört. Kehre zum Relikt zurück.", "quest"))
-		PlayerStats.system_message.emit("Ein Karkosa-Riss wurde im Ostflügel geortet.", "warn")
+	if st == 1 and npcs.has("tamas") and is_instance_valid(npcs.tamas) and PlayerStats.flag("tamas", "") == "" and not PlayerStats.flag("tamas_met"):
+		if player.global_position.distance_to(npcs.tamas.global_position) < 7.0 and state == "play":
+			story.tamas_encounter(npcs.tamas)
+	if z == "village" and npcs.has("lenz") and is_instance_valid(npcs.lenz) and not PlayerStats.flag("guard_met") and state == "play" and npcs.lenz.alive:
+		if player.global_position.distance_to(npcs.lenz.global_position) < 9.0:
+			story.guard_greet(npcs.lenz)
 
-func _director(delta: float) -> void:
-	if state != "play" or player.dead:
-		return
+func _update_compass() -> void:
+	var marks: Array = []
 	var st := int(PlayerStats.s.story)
-	# Kapitel-1-Welle im Archiv
-	if st == 1:
-		var alive := 0
-		for e in get_tree().get_nodes_in_group("enemies"):
-			if (e as Enemy).has_meta("wave") and (e as Enemy).state != "dead":
-				alive += 1
-		var goal := 6
-		var killed := int(PlayerStats.s.story_progress)
-		if alive < 3 and killed + alive < goal:
-			ambient_t -= delta
-			if ambient_t <= 0.0:
-				ambient_t = 1.2
-				var sp: Vector3 = academy.spawns.breach[randi() % academy.spawns.breach.size()]
-				var e := spawn_enemy("karkosa", sp + Vector3(randf_range(-0.5, 0.5), 0, 0), 1)
-				e.set_meta("wave", true)
-				e.aggro = true
-				e.died.connect(func(_e): PlayerStats.story_advance_progress(1))
-				burst(sp + Vector3(0, 0.8, 0), Color(0.6, 1.0, 0.2), 1.2)
-				sfx("hit")
-		return
-	if st < 2:
-		return
-	_chapter2_director()
-	# Umherstreifende Gegner
-	ambient = ambient.filter(func(e): return is_instance_valid(e) and (e as Enemy).state != "dead")
-	var target := mini(9, 4 + int(PlayerStats.s.level) / 3)
-	ambient_t -= delta
-	if ambient.size() < target and ambient_t <= 0.0:
-		ambient_t = 3.0
-		_spawn_ambient()
+	var sp: Dictionary = places.spots
+	match st:
+		1:
+			if npcs.has("tamas") and is_instance_valid(npcs.tamas) and PlayerStats.flag("tamas", "") == "":
+				marks.append([npcs.tamas.global_position, Color(1.0, 0.8, 0.35), "!"])
+		2:
+			marks.append([sp.village, Color(1.0, 0.8, 0.35), "ASCH-FURT"])
+		3:
+			if PlayerStats.flag("has_amulet"):
+				marks.append([sp.npc_elder, Color(1.0, 0.8, 0.35), "HANNA"])
+			elif PlayerStats.flag("jory_investigate"):
+				marks.append([sp.bandits, Color(1.0, 0.4, 0.3), "KRÄHE"])
+			else:
+				marks.append([sp.cage, Color(1.0, 0.8, 0.35), "JORY"])
+		4:
+			marks.append([sp.ruin_altar, Color(1.0, 0.2, 0.3), "RUINE"])
+	if PlayerStats.flag("cult_lead") and not PlayerStats.flag("shrine_read"):
+		marks.append([sp.shrine, Color(0.9, 0.2, 0.3), "SCHREIN"])
+	hud.compass_marks = marks
 
-func _spawn_ambient() -> void:
-	var h := PlayerStats.clock_hour()
-	var night := h >= 22 or h < 5
-	var options := []
-	var st := int(PlayerStats.s.story)
-	for zone in academy.spawns:
-		if zone == "breach":
-			continue
-		if zone == "courtyard" and not night:
-			continue
-		if Academy.CRYPT_ZONES.has(zone) and st < 8:
-			continue
-		for p in academy.spawns[zone]:
-			var d: float = (p as Vector3).distance_to(player.global_position)
-			if d > 13.0 and d < 48.0:
-				options.append([zone, p])
-	if options.is_empty():
+func _director() -> void:
+	if not PlayerStats.s.started:
 		return
-	var pick: Array = options[randi() % options.size()]
-	var zone: String = pick[0]
-	var kind := "karkosa"
-	var r := randf()
-	match zone:
-		"archive":
-			kind = "mutant" if (night and r < 0.6) or r < 0.25 else "karkosa"
-		"corridor", "passage":
-			kind = "mutant" if r < 0.45 else "karkosa"
-		"hall":
-			var cadets := 0
-			for e in ambient:
-				if (e as Enemy).kind == "cadet":
-					cadets += 1
-			kind = "cadet" if cadets < 2 and r < 0.7 else "karkosa"
-		"eastwing":
-			kind = "karkosa_elite" if r < 0.18 + int(PlayerStats.s.level) * 0.01 else ("mutant" if r < 0.45 else "karkosa")
-		"courtyard":
-			kind = "karkosa" if r < 0.7 else "mutant"
-		"crypt", "ossuary":
-			kind = "mutant" if r < 0.5 else ("karkosa_elite" if r < 0.65 else "karkosa")
-	var e := spawn_enemy(kind, (pick[1] as Vector3) + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)))
-	ambient.append(e)
+	_check_events()
+	# Tamas läuft ins Dorf
+	if npcs.has("tamas") and is_instance_valid(npcs.tamas) and npcs.tamas.alive and PlayerStats.flag("tamas", "") in ["helped", "sipped"]:
+		if npcs.tamas.global_position.distance_to(places.spots.village) < 30.0 and not PlayerStats.flag("tamas_arrived"):
+			PlayerStats.set_flag("tamas_arrived")
+	# Jory verlässt die Gegend
+	if npcs.has("jory") and is_instance_valid(npcs.jory) and npcs.jory.has_meta("leaving"):
+		if npcs.jory.global_position.distance_to(player.global_position) > 70.0:
+			npcs.jory.queue_free()
+			npcs.erase("jory")
 
-func _spawn_instructor() -> void:
-	if instructor != null and is_instance_valid(instructor) and instructor.state != "dead":
-		return
-	var best := Vector3.ZERO
-	var bd := 0.0
-	for zone in ["hall", "corridor", "archive"]:
-		for p in academy.spawns[zone]:
-			var d: float = (p as Vector3).distance_to(player.global_position)
-			if d > bd and d < 50.0:
-				bd = d
-				best = p
-	instructor = spawn_enemy("instructor", best, int(PlayerStats.s.level) + 1)
-	instructor.aggro = true
-	instructor.died.connect(func(_e):
-		PlayerStats.system_message.emit("Ausbilder Varek ist gefallen. Niemand darf je davon erfahren …", "warn")
-		PlayerStats.add_suspicion(10.0))
+func _check_events() -> void:
+	var day := int(PlayerStats.s.day)
+	var hour := PlayerStats.clock_hour()
+	# Hinrichtung bei Sonnenaufgang
+	var dl: Variant = PlayerStats.flag("jory_deadline", -1)
+	if int(dl) > 0 and not PlayerStats.flag("jory_resolved") and (day > int(dl) or (day == int(dl) and hour >= 6)):
+		if npcs.has("jory") and is_instance_valid(npcs.jory):
+			npcs.jory.queue_free()
+			npcs.erase("jory")
+		story.jory_hanged()
+	# Tamas stirbt ohne Hilfe
+	if PlayerStats.flag("tamas", "") == "left" and not PlayerStats.is_dead("tamas") and day > _last_day:
+		PlayerStats.mark_dead("tamas")
+	if day > _last_day:
+		_last_day = day
+		if PlayerStats.flag("tamas", "") in ["drained", "left"]:
+			PlayerStats.set_flag("tamas_found")
 
-func _check_midnight() -> void:
-	if PlayerStats.s.hidden.midnight_vault or state != "play":
-		return
-	if PlayerStats.clock_hour() == 0 and player.global_position.distance_to(Academy.VAULT_SIGIL) < 2.4:
-		PlayerStats.s.hidden.midnight_vault = true
-		audio.play("awaken", 0.0, 0.0)
-		hud.red_flash = 0.8
-		_cutscene_at(Academy.VAULT_SIGIL, [
-			{"who": "SYSTEM", "text": "VERBORGENE QUEST ENTDECKT: „Stunde Null“."},
-			{"who": "PROTOKOLL", "text": "Hier ruhte mein erster Wirt. Er hat die Sonne verschlungen, bevor sie ihn verbrannten."},
-			{"who": "PROTOKOLL", "text": "Nimm, was von ihm blieb."},
-			{"who": "SYSTEM", "text": "Verborgener Skill erhalten: ECLIPSE. Permanenter Bonus: +2 SHD."},
-		], func():
-			PlayerStats.grant_skill("eclipse")
-			PlayerStats.s.shd = int(PlayerStats.s.shd) + 2
-			PlayerStats.add_xp(300)
-			PlayerStats.system_message.emit("Verborgene Quest abgeschlossen: Stunde Null", "quest")
-			hud.show_banner("ECLIPSE ERWACHT")
-			PlayerStats.save_game())
-
-# ---------- Tod & Wiederbelebung ----------
+# ---------- Tod ----------
 
 func _on_player_died() -> void:
 	if player.dead:
@@ -1198,6 +1017,7 @@ func _on_player_died() -> void:
 	player.die()
 	death_t = 0.0
 	hud.death_t = 0.0
+	state = "dead"
 	audio.play("boom", 0.0, 0.0)
 	if menu.visible:
 		toggle_menu()
@@ -1208,70 +1028,258 @@ func _respawn() -> void:
 	var s := PlayerStats.s
 	s.xp = int(int(s.xp) * 0.8)
 	s.hp = PlayerStats.max_hp()
-	s.blood = max(float(s.blood), 45.0)
-	var spot := Academy.CRYPT_RESPAWN if Academy.CRYPT_ZONES.has(last_zone) else Academy.RESPAWN
-	player.revive(spot)
-	_cam_focus = player.global_position
-	for e in get_tree().get_nodes_in_group("enemies"):
-		var en := e as Enemy
-		if en.global_position.distance_to(spot) < 12.0 and not en.is_boss() and not en.has_meta("wave"):
-			en.aggro = false
-			en.global_position = en.home
-	PlayerStats.system_message.emit("Wirt stabilisiert. −20 % EXP der aktuellen Stufe.", "sys")
-	PlayerStats.stats_changed.emit()
+	s.blood = maxf(float(s.blood), 30.0)
+	PlayerStats.change_humanity(-1.0, "Die Erste Nacht holt dich zurück")
+	player.revive(places.spots.ruin_wake + Vector3(0, 0.3, 0))
+	rig.global_position = player.global_position + Vector3(0, 1.5, 0)
+	state = "play"
+	PlayerStats.system_message.emit("−20 % EXP der aktuellen Stufe.", "sys")
+	PlayerStats.save_game()
 
-# ---------- Kapseln, Geschosse, Effekte ----------
+# ---------- Effekte ----------
 
-func _update_capsules(delta: float) -> void:
-	var keep: Array = []
-	for c in capsules:
-		var n: Node3D = c.n
-		c.t += delta
-		var base: Vector3 = c.base
-		n.rotation.y += delta * 2.0
-		var target := base + Vector3(0, 0.7 + sin(c.t * 3.0) * 0.1, 0)
-		var d := player.global_position.distance_to(n.global_position - Vector3(0, 0.7, 0))
-		if PlayerStats.s.awakened and not player.dead and d < 3.4 and c.t > 0.35:
-			c.base = base.lerp(player.global_position, clamp(delta * 8.0, 0.0, 1.0))
-			target = c.base + Vector3(0, 0.9, 0)
-		n.global_position = n.global_position.lerp(target, clamp(delta * 10.0, 0.0, 1.0))
-		if d < 0.9 and PlayerStats.s.awakened and not player.dead:
-			PlayerStats.pick_capsule(c.kind)
-			sfx("tick")
-			burst(n.global_position, PlayerStats.BLOOD_TYPES[c.kind].color, 0.6)
-			n.queue_free()
-			continue
-		if c.t > 90.0:
-			n.queue_free()
-			continue
-		keep.append(c)
-	capsules = keep
+func damage_number(pos: Vector3, amount: float, color: Color, crit: bool, text := "") -> void:
+	var l := Label3D.new()
+	l.text = text if text != "" else str(int(round(amount)))
+	if crit and text == "":
+		l.text += "!"
+	l.font = H.F_BOLD
+	l.font_size = 60 if crit else 44
+	l.pixel_size = 0.005
+	l.modulate = color
+	l.outline_modulate = Color(0, 0, 0, 0.85)
+	l.outline_size = 12
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.render_priority = 10
+	l.position = pos + Vector3(randf_range(-0.3, 0.3), 0, randf_range(-0.2, 0.2))
+	add_child(l)
+	fx.append({"n": l, "t": 0.0, "life": 0.75, "kind": "num", "v": Vector3(0, 2.4, 0)})
 
-func _update_spits(delta: float) -> void:
+func burst(pos: Vector3, color: Color, size := 1.0) -> void:
+	var p := CPUParticles3D.new()
+	var m := BoxMesh.new()
+	m.size = Vector3.ONE * 0.07 * size
+	p.mesh = m
+	p.material_override = Toon.mat(color, {"emit": color, "energy": 2.5})
+	p.amount = int(10 + 6 * size)
+	p.lifetime = 0.55
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.direction = Vector3.UP
+	p.spread = 180.0
+	p.initial_velocity_min = 1.5 * size
+	p.initial_velocity_max = 4.5 * size
+	p.gravity = Vector3(0, -9.0, 0)
+	p.position = pos
+	p.emitting = true
+	add_child(p)
+	fx.append({"n": p, "t": 0.0, "life": 1.0, "kind": "free"})
+
+func blood_hit(a: Node3D, from: Vector3, big: bool) -> void:
+	if not is_instance_valid(a):
+		return
+	var col := Color(0.55, 0.02, 0.05)
+	if a is Actor:
+		var ac := a as Actor
+		if ac.kind == "beast":
+			col = Color(0.35, 0.08, 0.4)
+		elif ac.kind == "animal":
+			col = Color(0.5, 0.05, 0.04)
+	var dir := a.global_position - from
+	dir.y = 0
+	dir = dir.normalized() if dir.length() > 0.01 else Vector3.FORWARD
+	var p := CPUParticles3D.new()
+	var m := SphereMesh.new()
+	m.radius = 0.04
+	m.height = 0.08
+	m.radial_segments = 4
+	m.rings = 2
+	p.mesh = m
+	p.material_override = Toon.mat(col, {"rough": 0.3})
+	p.amount = 14 if big else 7
+	p.lifetime = 0.5
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.direction = (dir + Vector3(0, 0.6, 0)).normalized()
+	p.spread = 35.0
+	p.initial_velocity_min = 2.5
+	p.initial_velocity_max = 6.5 if big else 4.0
+	p.gravity = Vector3(0, -16.0, 0)
+	p.position = a.global_position + Vector3(0, 1.1, 0)
+	p.emitting = true
+	add_child(p)
+	fx.append({"n": p, "t": 0.0, "life": 0.9, "kind": "free"})
+	if big or randf() < 0.3:
+		splat(a.global_position + dir * randf_range(0.5, 1.2), col, randf_range(0.6, 1.2))
+
+func splat(pos: Vector3, col: Color, size: float) -> void:
+	var mi := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(size, size)
+	mi.mesh = q
+	var mat := ShaderMaterial.new()
+	mat.shader = SPLAT
+	mat.set_shader_parameter("color", Color(col.r, col.g, col.b, 0.85))
+	mat.set_shader_parameter("seed", randf() * 100.0)
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var n := terrain.normal_at(pos.x, pos.z)
+	mi.basis = Basis(Quaternion(Vector3.UP, n)) * Basis(Vector3.RIGHT, -PI * 0.5) * Basis(Vector3.FORWARD, randf() * TAU)
+	mi.position = terrain.ground(pos) + n * (0.04 + decals.size() * 0.0005)
+	add_child(mi)
+	decals.append({"n": mi, "m": mat, "t": 0.0})
+	if decals.size() > 40:
+		var old: Dictionary = decals.pop_front()
+		(old.n as Node).queue_free()
+
+func _update_decals(delta: float) -> void:
+	for d in decals:
+		d.t += delta
+		if float(d.t) > 30.0:
+			(d.m as ShaderMaterial).set_shader_parameter("alpha", clampf(1.0 - (float(d.t) - 30.0) / 8.0, 0.0, 1.0))
+	while decals.size() > 0 and float(decals[0].t) > 38.0:
+		var old: Dictionary = decals.pop_front()
+		(old.n as Node).queue_free()
+
+func afterimage(pos: Vector3, rot_y: float) -> void:
+	var mi := MeshInstance3D.new()
+	var c := CapsuleMesh.new()
+	c.radius = 0.3
+	c.height = 1.75
+	c.radial_segments = 8
+	c.rings = 2
+	mi.mesh = c
+	mi.material_override = Toon.holo(Color(0.75, 0.05, 0.2), 1.0, false, 0.5).duplicate()
+	mi.position = pos + Vector3(0, 0.9, 0)
+	mi.rotation.y = rot_y
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	fx.append({"n": mi, "t": 0.0, "life": 0.28, "kind": "fade"})
+
+func _build_fx_assets() -> void:
+	_arc_mesh = _make_arc(1.0, 2.4, -1.25, 1.25, 18)
+	_ring_mesh = _make_arc(1.2, 2.2, 0.0, TAU, 40)
+	_ribbon_red = Toon.holo(Color(1.0, 0.12, 0.2), 2.2, false, 0.0).duplicate()
+	_ribbon_red.set_shader_parameter("ribbon", 1.0)
+
+func _make_arc(r0: float, r1: float, a0: float, a1: float, segs: int) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in segs:
+		var fa := float(i) / segs
+		var fb := float(i + 1) / segs
+		var aa := lerpf(a0, a1, fa)
+		var ab := lerpf(a0, a1, fb)
+		var pa0 := Vector3(sin(aa) * r0, 0, -cos(aa) * r0)
+		var pa1 := Vector3(sin(aa) * r1, 0, -cos(aa) * r1)
+		var pb0 := Vector3(sin(ab) * r0, 0, -cos(ab) * r0)
+		var pb1 := Vector3(sin(ab) * r1, 0, -cos(ab) * r1)
+		for q in [[pa0, Vector2(fa, 0)], [pa1, Vector2(fa, 1)], [pb1, Vector2(fb, 1)], [pa0, Vector2(fa, 0)], [pb1, Vector2(fb, 1)], [pb0, Vector2(fb, 0)]]:
+			st.set_uv(q[1])
+			st.add_vertex(q[0])
+	return st.commit()
+
+func slash_fx(pos: Vector3, dir: Vector3, combo: int) -> void:
+	var mi := MeshInstance3D.new()
+	mi.mesh = _ring_mesh if combo == 2 else _arc_mesh
+	mi.material_override = _ribbon_red.duplicate()
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = pos + Vector3(0, 1.0 if combo < 2 else 0.3, 0)
+	mi.rotation.y = atan2(-dir.x, -dir.z)
+	if combo == 1:
+		mi.scale = Vector3(-1, 1, 1)
+	add_child(mi)
+	fx.append({"n": mi, "t": 0.0, "life": 0.18, "kind": "fade"})
+
+func scythe_fx(pos: Vector3, col: Color) -> void:
+	var mi := MeshInstance3D.new()
+	mi.mesh = _ring_mesh
+	var m := Toon.holo(col, 2.4, false, 0.0).duplicate()
+	m.set_shader_parameter("ribbon", 1.0)
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = pos + Vector3(0, 0.8, 0)
+	mi.scale = Vector3.ONE * 0.4
+	add_child(mi)
+	fx.append({"n": mi, "t": 0.0, "life": 0.38, "kind": "grow", "to": 1.9, "spin": 14.0})
+	burst(pos + Vector3(0, 0.8, 0), col, 1.4)
+
+func spawn_bolt(from: Vector3, to: Vector3, dmg: float) -> void:
+	var mi := MeshInstance3D.new()
+	var b := BoxMesh.new()
+	b.size = Vector3(0.04, 0.04, 0.7)
+	mi.mesh = b
+	mi.material_override = Toon.mat(Color(0.4, 0.3, 0.2))
+	mi.position = from
+	add_child(mi)
+	mi.look_at(to)
+	bolts.append({"n": mi, "v": (to - from).normalized() * 26.0, "t": 0.0, "dmg": dmg})
+	sfx("swing")
+
+func _update_bolts(delta: float) -> void:
 	var keep: Array = []
 	var space := get_world_3d().direct_space_state
-	for s in spits:
-		var n: Node3D = s.n
-		s.t += delta
-		if eclipse_active():
-			keep.append(s)
-			continue
+	for b in bolts:
+		var n: Node3D = b.n
+		b.t += delta
 		var from := n.global_position
-		var to: Vector3 = from + s.v * delta
+		var to: Vector3 = from + b.v * delta
 		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(from, to, 1))
-		var pd := player.global_position + Vector3(0, 1.0, 0) - to
-		if pd.length() < 0.75 and not player.is_invulnerable():
-			player.receive_hit(float(s.dmg), from)
-			burst(to, Color(0.7, 0.3, 1.0), 0.7)
+		if (player.global_position + Vector3(0, 1.0, 0)).distance_to(to) < 0.7 and not player.is_invulnerable():
+			player.receive_hit(float(b.dmg), from)
 			n.queue_free()
 			continue
-		if not hit.is_empty() or s.t > 2.2:
-			burst(to, Color(0.7, 0.3, 1.0), 0.5)
+		if not hit.is_empty() or float(b.t) > 1.5:
 			n.queue_free()
 			continue
 		n.global_position = to
-		keep.append(s)
-	spits = keep
+		keep.append(b)
+	bolts = keep
+
+func spawn_loot(it: Dictionary, pos: Vector3) -> void:
+	var n := Node3D.new()
+	var col := Items.color(it)
+	var beam := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.05
+	cm.bottom_radius = 0.1
+	cm.height = 3.0 + int(it.rarity) * 0.8
+	cm.radial_segments = 8
+	cm.rings = 1
+	beam.mesh = cm
+	beam.material_override = Toon.holo(col, 0.6 + int(it.rarity) * 0.25, false, 0.4)
+	beam.position.y = cm.height * 0.5
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(beam)
+	var icon := MeshInstance3D.new()
+	var pm := PrismMesh.new()
+	pm.size = Vector3(0.12, 0.7, 0.05)
+	icon.mesh = pm
+	icon.material_override = Toon.mat(col, {"emit": col, "energy": 1.4})
+	icon.position.y = 0.75
+	icon.name = "Icon"
+	n.add_child(icon)
+	n.position = terrain.ground(pos + Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5)))
+	add_child(n)
+	loot.append({"n": n, "item": it, "t": 0.0})
+
+func _update_loot(delta: float) -> void:
+	var keep: Array = []
+	for d in loot:
+		var n: Node3D = d.n
+		d.t += delta
+		var icon := n.get_node("Icon") as Node3D
+		icon.rotation.y += delta * 2.5
+		if float(d.t) > 0.5 and not player.dead and n.global_position.distance_to(player.global_position) < 1.4:
+			if PlayerStats.add_item(d.item):
+				burst(n.global_position + Vector3(0, 0.8, 0), Items.color(d.item), 0.9)
+				sfx("tick")
+				n.queue_free()
+				continue
+			d.t = -3.0
+		keep.append(d)
+	loot = keep
 
 func _update_fx(delta: float, rd: float) -> void:
 	var keep: Array = []
@@ -1285,21 +1293,11 @@ func _update_fx(delta: float, rd: float) -> void:
 				(n as Label3D).modulate.a = clampf(1.6 - k * 1.6, 0.0, 1.0)
 			"fade":
 				Toon.set_alpha(n, 1.0 - k)
-				if f.has("spin"):
-					(n as Node3D).rotation.y += float(f.spin) * delta * (1.0 - k)
 			"grow":
 				var s: float = lerpf(0.4, float(f.to), 1.0 - pow(1.0 - k, 3.0))
 				(n as Node3D).scale = Vector3(s, 1, s)
 				(n as Node3D).rotation.y += float(f.spin) * delta
 				Toon.set_alpha(n, 1.0 - k * k)
-			"echo":
-				if k >= 1.0:
-					var pos: Vector3 = f.pos
-					for e in get_tree().get_nodes_in_group("enemies"):
-						var en := e as Enemy
-						if en.state != "dead" and en.global_position.distance_to(pos) < 2.8:
-							en.take_hit(PlayerStats.shadow_damage() * 0.8, pos, 6.0, false, Color(0.75, 0.5, 1.0))
-					burst(pos + Vector3(0, 0.8, 0), Color(0.5, 0.2, 0.9), 1.8)
 		if k >= 1.0:
 			if n != null and is_instance_valid(n):
 				(n as Node).queue_free()

@@ -20,9 +20,9 @@ const WEAPONS := {
 	"daggers": {"name": "Zwillingsdolche", "reach": -0.45, "aspd": 1.4, "dmg": 0.78, "arc": 0.3, "len": 0.55, "width": 0.04,
 		"desc": "Sehr schnell, zwei Klingen, kurze Reichweite."},
 }
-const ARMORS := ["Kadettenuniform", "Schattenmantel", "Chitinharnisch", "Nachtjäger-Montur"]
-const RELICS := ["Blutamulett", "Karkosa-Herz", "Runensplitter", "Gruftsiegel"]
-const LEGEND_PREFIX := ["Varek's", "Des ersten Wirts", "Nyx-", "Eklipsen-", "Sanguine-"]
+const ARMORS := ["Wacht-Uniform", "Schattenmantel", "Chitinharnisch", "Nachtjäger-Montur"]
+const RELICS := ["Blutamulett", "Schleiersplitter", "Runensplitter", "Gruftsiegel"]
+const LEGEND_PREFIX := ["Varek's", "Der Ersten Nacht", "Morrow-", "Eklipsen-", "Krähen-"]
 
 ## Eigenschaften: Anzeigename, Grundwert je Stufe, Format
 const AFFIX := {

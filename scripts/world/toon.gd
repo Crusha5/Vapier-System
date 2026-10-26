@@ -1,8 +1,8 @@
 class_name Toon
 extends RefCounted
-## Materialien (Cel-Shading + Kontur) und kleine Geometrie-Bausteine.
+## Materialien (düster-stilisiert, weiches Licht, optionale dezente Kontur) und Geometrie-Bausteine.
 
-const TOON := preload("res://shaders/toon.gdshader")
+const TOON := preload("res://shaders/soft.gdshader")
 const OUTLINE := preload("res://shaders/outline.gdshader")
 const OVERLAY := preload("res://shaders/overlay.gdshader")
 const HOLO := preload("res://shaders/holo.gdshader")
@@ -16,6 +16,9 @@ const STONE_DARK := Color(0.17, 0.19, 0.25)
 const METAL := Color(0.42, 0.46, 0.53)
 const CHITIN := Color(0.16, 0.32, 0.3)
 const INK := Color(0.015, 0.012, 0.03)
+
+## Dezente Konturen nur an Figuren
+const OUTLINES := true
 
 static var _cache := {}
 static var fade_mats: Array[ShaderMaterial] = []
@@ -34,19 +37,19 @@ static func mat(color: Color, opts := {}) -> ShaderMaterial:
 		m.set_shader_parameter("rim_strength", opts.rim)
 		m.set_shader_parameter("rim_color", opts.get("rim_color", CYAN))
 	if opts.has("spec"):
-		m.set_shader_parameter("spec_strength", opts.spec)
-	if opts.has("tiles"):
-		m.set_shader_parameter("tiles", opts.tiles)
-		m.set_shader_parameter("tile_size", opts.get("tile_size", 2.0))
+		m.set_shader_parameter("roughness", clampf(0.85 - float(opts.spec) * 0.5, 0.25, 1.0))
+	if opts.has("metal"):
+		m.set_shader_parameter("metallic", opts.metal)
+	if opts.has("rough"):
+		m.set_shader_parameter("roughness", opts.rough)
 	if opts.has("grime"):
 		m.set_shader_parameter("grime", opts.grime)
-	if opts.get("fade", false):
-		m.set_shader_parameter("fade_occluder", true)
-		fade_mats.append(m)
-	if opts.get("outline", 0.0) > 0.0:
+	if opts.get("vcolor", false):
+		m.set_shader_parameter("use_vcolor", true)
+	if opts.get("outline", 0.0) > 0.0 and OUTLINES:
 		var o := ShaderMaterial.new()
 		o.shader = OUTLINE
-		o.set_shader_parameter("thickness", opts.outline)
+		o.set_shader_parameter("thickness", float(opts.outline) * 0.45)
 		o.set_shader_parameter("radial", opts.get("radial", 0.0))
 		if opts.get("fade", false):
 			o.set_shader_parameter("fade_occluder", true)

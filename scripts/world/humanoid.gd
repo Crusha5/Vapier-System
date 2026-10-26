@@ -12,6 +12,7 @@ var hand_l: BoneAttachment3D
 var blade: MeshInstance3D
 var blade_l: MeshInstance3D
 var bi := {}
+var surfaces: Array = []
 
 var phase := 0.0
 var move_amt := 0.0
@@ -23,6 +24,8 @@ var _breath := 0.0
 var _idle_t := 0.0
 var lean := 0.0          # Dauerhaftes Vorbeugen (z. B. Mutant)
 var weapon_pose := true  # Klinge vor dem Körper halten
+const HOLD := ["windup", "kneel", "sit", "lie", "feed", "cower", "sleep"]
+var bed_height := 0.0
 
 func _init(cfg := {}) -> void:
 	look = {
@@ -56,7 +59,10 @@ func _surf_mat(s: String) -> Material:
 		"dark":
 			return Toon.amat(look.suit2, {"outline": 0.022, "rim": _rim(look.suit2), "spec": 0.4})
 		"accent":
-			return Toon.amat(look.accent, {"emit": look.accent, "energy": 1.4, "outline": 0.012})
+			var ag: float = look.get("accent_glow", 1.4)
+			if ag <= 0.0:
+				return Toon.amat(look.accent, {"outline": 0.012, "rough": 0.7})
+			return Toon.amat(look.accent, {"emit": look.accent, "energy": ag, "outline": 0.012})
 		"hair":
 			return Toon.amat(look.hair, {"outline": 0.024, "rim": 0.5, "spec": 0.5})
 		"metal":
@@ -82,6 +88,7 @@ func _build() -> void:
 	body = MeshInstance3D.new()
 	body.mesh = res.mesh
 	var surfs: Array = res.surfaces
+	surfaces = surfs
 	for i in surfs.size():
 		body.set_surface_override_material(i, _surf_mat(surfs[i]))
 	skel.add_child(body)
@@ -178,10 +185,29 @@ func blade_base(left := false) -> Vector3:
 		return global_position + Vector3(0, 1.0, 0)
 	return b.global_transform * Vector3(0, -0.3 * (b.mesh as PrismMesh).size.y, 0)
 
+## Hautfarbe zur Laufzeit ändern (z. B. Blässe je nach Menschlichkeit)
+func set_skin(c: Color) -> void:
+	look.skin = c
+	var i := surfaces.find("skin")
+	if i >= 0:
+		body.set_surface_override_material(i, _surf_mat("skin"))
+
+## Ego-Perspektive: Körper wirft nur noch Schatten
+func set_shadow_only(v: bool) -> void:
+	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if v else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	eyes.visible = not v
+	for b in [blade, blade_l]:
+		if b:
+			b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if v else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			(b.get_meta("hilt") as GeometryInstance3D).cast_shadow = b.cast_shadow
+
 func set_eye_glow(color: Color, energy: float) -> void:
 	eyes.material_override = Toon.amat(color, {"emit": color, "energy": energy})
 
 func play(a: String, n := 0) -> void:
+	if action == "lie" or action == "sleep" or action == "dead":
+		rotation.x = 0.0
+		position.y = 0.0
 	action = a
 	action_t = 0.0
 	combo = n
@@ -198,7 +224,7 @@ func animate(delta: float, speed: float, action_len := 0.3) -> void:
 	_idle_t += delta
 	if action != "" and action != "dead":
 		action_t += delta / maxf(action_len, 0.05)
-		if action_t >= 1.0 and action != "windup":
+		if action_t >= 1.0 and not HOLD.has(action):
 			action = ""
 	var s := sin(phase)
 	var c := cos(phase)
@@ -310,6 +336,62 @@ func animate(delta: float, speed: float, action_len := 0.3) -> void:
 			arm_r = Vector3(0.6 + 0.2 * tk, -0.3, 0.25)
 			fore_r = Vector3(1.2, 0, 0)
 			head.x += sin(_idle_t * 5.0) * 0.04
+		"kneel", "cower":
+			var k := minf(1.0, action_t * 3.0)
+			hip_y = lerpf(hip_y, -0.44, k)
+			thigh_l = thigh_l.lerp(Vector3(0.2, 0, 0.08), k)
+			thigh_r = thigh_r.lerp(Vector3(0.1, 0, -0.08), k)
+			shin_l = shin_l.lerp(Vector3(-1.6, 0, 0), k)
+			shin_r = shin_r.lerp(Vector3(-1.6, 0, 0), k)
+			foot_l = Vector3(0.5, 0, 0) * k
+			foot_r = Vector3(0.5, 0, 0) * k
+			spine = spine.lerp(Vector3(-0.3, 0, 0), k)
+			head = head.lerp(Vector3(-0.35 + sin(_idle_t * 1.3) * 0.05, 0, 0), k)
+			if action == "cower":
+				arm_l = arm_l.lerp(Vector3(2.3, 0.3, -0.2), k)
+				arm_r = arm_r.lerp(Vector3(2.3, -0.3, 0.2), k)
+				fore_l = Vector3(1.9, 0, 0) * k
+				fore_r = Vector3(1.9, 0, 0) * k
+			else:
+				arm_l = arm_l.lerp(Vector3(0.35, 0, -0.1), k)
+				arm_r = arm_r.lerp(Vector3(0.35, 0, 0.1), k)
+				fore_l = Vector3(0.5, 0, 0) * k
+				fore_r = Vector3(0.5, 0, 0) * k
+		"sit":
+			var k := minf(1.0, action_t * 3.0)
+			hip_y = lerpf(hip_y, -0.66, k)
+			thigh_l = Vector3(1.45, 0, 0.12) * k
+			thigh_r = Vector3(1.45, 0, -0.12) * k
+			shin_l = Vector3(-1.25, 0, 0) * k
+			shin_r = Vector3(-1.25, 0, 0) * k
+			spine = Vector3(0.05, 0, 0)
+			arm_l = Vector3(0.5, 0, -0.15)
+			arm_r = Vector3(0.5, 0, 0.15)
+			fore_l = Vector3(0.9, 0, 0)
+			fore_r = Vector3(0.9, 0, 0)
+		"lie", "sleep":
+			var d := minf(1.0, action_t * 2.0)
+			rotation.x = lerpf(0.0, PI * 0.5, d)
+			position.y = lerpf(0.0, 0.16 + bed_height, d)
+			chest.x += sin(_breath * (1.6 if action == "lie" else 0.8)) * 0.04
+			arm_l = Vector3(0.1, 0, -0.35)
+			arm_r = Vector3(0.6 if action == "lie" else 0.1, 0, 0.3)
+			fore_r = Vector3(1.4 if action == "lie" else 0.2, 0, 0)
+			head = Vector3(0, 0.4 if action == "sleep" else sin(_idle_t * 0.8) * 0.2, 0)
+		"feed":
+			var k := minf(1.0, action_t * 4.0)
+			hip_y = lerpf(hip_y, -0.18, k)
+			spine = spine.lerp(Vector3(-0.45, 0, 0), k)
+			chest = chest.lerp(Vector3(-0.2, 0, 0), k)
+			neck = Vector3(-0.3, 0, 0) * k
+			head = Vector3(-0.35, 0.3, 0.25) * k
+			arm_l = arm_l.lerp(Vector3(1.2, 0.35, -0.3), k)
+			arm_r = arm_r.lerp(Vector3(1.2, -0.35, 0.3), k)
+			fore_l = Vector3(0.9, 0, 0) * k
+			fore_r = Vector3(0.9, 0, 0) * k
+			thigh_l = Vector3(0.45, 0, 0) * k
+			shin_l = Vector3(-0.6, 0, 0) * k
+			thigh_r = Vector3(-0.2, 0, 0) * k
 		"dead":
 			var d: float = minf(1.0, action_t + delta * 2.5)
 			action_t = d
