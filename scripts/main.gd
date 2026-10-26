@@ -313,7 +313,16 @@ func _build_title() -> void:
 	var note := H.wrap("Ein einziger Spielstand. Jede Entscheidung wird sofort gespeichert – es gibt kein Zurück.", 10, Color(H.MUTED, 0.8))
 	note.custom_minimum_size = Vector2(280, 0)
 	v.add_child(note)
-	v.add_child(H.lbl("v0.3.0 · Open-World-Prototyp", 9, Color(H.MUTED, 0.6), H.F_MONO))
+	var br := SystemWindow.brightness_row(_refresh_title)
+	br.custom_minimum_size = Vector2(280, 0)
+	v.add_child(br)
+	v.add_child(H.lbl("v0.4.0 · Open-World-Prototyp", 9, Color(H.MUTED, 0.6), H.F_MONO))
+
+func _refresh_title() -> void:
+	if title:
+		title.queue_free()
+		title = null
+	_build_title()
 
 func _confirm_new(b: Button) -> void:
 	if not PlayerStats.s.started:

@@ -148,6 +148,7 @@ func _kv(k: String, v: String, vc := H.FG) -> HBoxContainer:
 
 func _status() -> void:
 	var s := PlayerStats.s
+	body.add_child(brightness_row(rebuild))
 	var head := H.hbox(14)
 	body.add_child(head)
 	var l := H.vbox(2)
@@ -395,3 +396,23 @@ func _buy(idx: int) -> void:
 		if world:
 			world.sfx("quest")
 		rebuild()
+
+## Helligkeit (Gerätestand, bleibt auch bei neuem Spiel erhalten)
+static func brightness_row(after: Callable) -> HBoxContainer:
+	var h := H.hbox(8)
+	var l := H.lbl("HELLIGKEIT", 12, H.MUTED, H.F_SEMI)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(l)
+	var minus := H.btn("  −  ", func():
+		PlayerStats.set_brightness(PlayerStats.brightness - 0.15)
+		after.call())
+	h.add_child(minus)
+	var v := H.lbl("%d %%" % int(round(PlayerStats.brightness * 100.0)), 13, H.FG, H.F_BOLD)
+	v.custom_minimum_size = Vector2(56, 0)
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	h.add_child(v)
+	var plus := H.btn("  +  ", func():
+		PlayerStats.set_brightness(PlayerStats.brightness + 0.15)
+		after.call())
+	h.add_child(plus)
+	return h

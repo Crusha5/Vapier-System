@@ -4,6 +4,13 @@ Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisi
 
 **Veyra** – eine Kolonie, seit zwölf Jahren vom **Schleier** (einem roten Sturm) von der Erde abgeschnitten. Soldat **Kael** hat sich geweigert, das Dorf Morrow niederzubrennen. Kommandant Varek hat ihn erschossen und in den Ruinen der Alten liegen lassen. Dort erweckt ihn **die Erste Nacht** – als Blutgeborenen, mit einem Protokoll im Kopf.
 
+## v0.4 – Grafik-Umbau
+
+- Echte Modelle statt Bastelformen: Bäume, Büsche, Farne, Gras, Felsen und Pilze aus dem **Stylized Nature MegaKit**, Häuser, Wagen, Kisten und Zäune aus dem **Medieval Village MegaKit** (beide von Quaternius, CC0), düster eingefärbt.
+- Gelände mit Gras-, Erd- und Felstexturen.
+- Deutlich hellere, gut lesbare Nacht (Mondlicht), Start in der Abenddämmerung, **Helligkeitsregler** (Titel und Systemmenü).
+- Für das Handy optimiert: Meshes zusammengefasst, Sichtweiten, ferne Bäume als einfache Ersatzmodelle.
+
 ## v0.3 – Offene Welt, Akt 1 „Die Erste Nacht“
 
 - **Offene Welt:** 560 × 560 m Gelände mit Fluss, See, Wäldern, Wegen. Ruinen der Alten, Dorf Asch-Furt, Krähes Banditenlager, Wachturm, Schrein, Landerwrack, Obelisken mit Lore.
@@ -16,6 +23,11 @@ Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisi
 - **Akt 1:** Tamas am Weg → Asch-Furt → Jory im Käfig (die Wacht hängt ihn bei Sonnenaufgang) → Krähe → Finale an der Ruine. Jede Wahl ist endgültig und steht in der Chronik.
 - **Ein einziger Spielstand,** automatisch gespeichert. Kein Zurück.
 - LitRPG-System: Stufen, Attribute, Fähigkeiten, Ausrüstung mit Seltenheiten, Laden, tägliche Aufgaben.
+
+## Fremde Assets
+
+- Quaternius – Stylized Nature MegaKit (CC0 1.0), `assets/nature/`
+- Quaternius – Medieval Village MegaKit (CC0 1.0), `assets/village/`
 
 ## Build
 

@@ -167,6 +167,16 @@ func _color(i: int, j: int, n: Vector3) -> Color:
 	c = c.lerp(Color(0.3, 0.3, 0.31), smoothstep(26.0, 14.0, Vector2(x, z).distance_to(RUIN)) * 0.6)
 	return c
 
+## Gewichte für die Texturen: x = Fels (Hang), y = Weg/Erde
+func _weights(i: int, j: int, n: Vector3) -> Vector2:
+	var y := h[j * N + i]
+	var x := -HALF + i * CELL
+	var z := -HALF + j * CELL
+	var rockw := smoothstep(0.16, 0.32, 1.0 - n.y)
+	var dirt := maxf(road_mask[j * N + i] * 0.95, smoothstep(1.6, 0.4, y) * 0.8)
+	dirt = maxf(dirt, smoothstep(26.0, 14.0, Vector2(x, z).distance_to(RUIN)) * 0.5)
+	return Vector2(rockw, dirt)
+
 func _build_mesh() -> void:
 	var nrm := PackedVector3Array()
 	nrm.resize(N * N)
@@ -179,12 +189,16 @@ func _build_mesh() -> void:
 			nrm[j * N + i] = Vector3(l - r, 2.0 * CELL, u - dd).normalized()
 	mat = ShaderMaterial.new()
 	mat.shader = preload("res://shaders/terrain.gdshader")
+	mat.set_shader_parameter("grass_tex", load("res://assets/terrain/ground_grass.png"))
+	mat.set_shader_parameter("dirt_tex", load("res://assets/terrain/ground_dirt.png"))
+	mat.set_shader_parameter("rock_tex", load("res://assets/terrain/ground_rock.png"))
 	var chunks := (N - 1) / CHUNK
 	for cj in chunks:
 		for ci in chunks:
 			var verts := PackedVector3Array()
 			var norms := PackedVector3Array()
 			var cols := PackedColorArray()
+			var wts := PackedVector2Array()
 			var idx := PackedInt32Array()
 			var w := CHUNK + 1
 			for j in w:
@@ -195,6 +209,7 @@ func _build_mesh() -> void:
 					var nn := nrm[gj * N + gi]
 					norms.append(nn)
 					cols.append(_color(gi, gj, nn))
+					wts.append(_weights(gi, gj, nn))
 			for j in CHUNK:
 				for i in CHUNK:
 					var a := j * w + i
@@ -207,6 +222,7 @@ func _build_mesh() -> void:
 			arr[Mesh.ARRAY_VERTEX] = verts
 			arr[Mesh.ARRAY_NORMAL] = norms
 			arr[Mesh.ARRAY_COLOR] = cols
+			arr[Mesh.ARRAY_TEX_UV] = wts
 			arr[Mesh.ARRAY_INDEX] = idx
 			var am := ArrayMesh.new()
 			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)

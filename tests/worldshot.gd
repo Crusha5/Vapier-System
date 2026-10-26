@@ -24,6 +24,8 @@ func _ready() -> void:
 		["w_day_forest", 15.0, Vector3(-50, 0, 60), Vector3(-80, 0, 110), 2.0],
 		["w_dusk_ruin", 19.6, Vector3(-140, 0, -120), Vector3(-170, 0, -160), 6.0],
 		["w_night_village", 23.0, Vector3(70, 0, 50), Vector3(98, 0, 28), 4.0],
+		["w_night_forest", 0.5, Vector3(-50, 0, 60), Vector3(-80, 0, 110), 2.0],
+		["w_day_village", 10.0, Vector3(120, 0, 10), Vector3(98, 0, 28), 3.0],
 		["w_overview", 11.0, Vector3(0, 0, 120), Vector3(0, 0, -60), 70.0],
 	]
 	for s in shots:

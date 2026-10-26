@@ -53,6 +53,16 @@ func _ready() -> void:
 		add_child(model)
 	home = global_position
 	_last_pos = global_position
+	_apply_vis_range.call_deferred(self)
+
+## Ferne Figuren nicht zeichnen (spart auf dem Handy viele Draw-Calls)
+func _apply_vis_range(n: Node) -> void:
+	if n is GeometryInstance3D:
+		var g := n as GeometryInstance3D
+		g.visibility_range_end = 75.0
+		g.visibility_range_end_margin = 5.0
+	for c in n.get_children():
+		_apply_vis_range(c)
 
 func _height() -> float:
 	return 1.75

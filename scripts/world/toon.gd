@@ -18,7 +18,7 @@ const CHITIN := Color(0.16, 0.32, 0.3)
 const INK := Color(0.015, 0.012, 0.03)
 
 ## Dezente Konturen nur an Figuren
-const OUTLINES := true
+const OUTLINES := false
 
 static var _cache := {}
 static var fade_mats: Array[ShaderMaterial] = []

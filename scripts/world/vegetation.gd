@@ -1,17 +1,39 @@
 class_name Vegetation
 extends Node3D
-## Bäume, Büsche, Gras und Felsen als MultiMesh je 64-m-Chunk, mit Sichtweiten-Abschaltung.
-## Stämme bekommen Kollision. Alle Meshes werden prozedural mit Vertexfarben erzeugt
-## (Alpha = Biegsamkeit für den Wind im Foliage-Shader).
+## Pflanzen und Felsen aus dem Quaternius „Stylized Nature MegaKit“ (CC0) als MultiMesh je 64-m-Chunk.
+## Nah: echte Modelle mit Textur (düster eingefärbt, Wind). Fern: einfache prozedurale Ersatz-Bäume.
+## Gras in 16-m-Feldern mit kurzer Sichtweite. Stämme und große Felsen bekommen Kollision.
 
 const FOLIAGE := preload("res://shaders/foliage.gdshader")
+const CUT := preload("res://shaders/flora_cut.gdshader")
+const SOLID := preload("res://shaders/flora_solid.gdshader")
+
+const KITS := {
+	"pine": ["Pine_1", "Pine_4"],
+	"oak": ["CommonTree_1", "CommonTree_3"],
+	"dead": ["DeadTree_1", "DeadTree_3"],
+	"birch": ["Birch_1"],
+	"giant": ["GiantPine_1"],
+	"twisted": ["TwistedTree_1"],
+	"bush": ["Bush_Common", "Bush_Large"],
+	"fern": ["Fern_1", "Plant_7"],
+	"rock": ["Rock_Medium_1", "Rock_Medium_3"],
+	"boulder": ["Rock_Big_1", "Rock_Big_2"],
+	"grass": ["Grass_Common_Short", "Grass_Wispy_Tall"],
+	"flower": ["Flower_3_Group"],
+	"shroom": ["Mushroom_Common", "Mushroom_RedCap"],
+}
+## Ersatz in der Ferne (prozedural, sehr wenige Dreiecke)
+const FAR := {"pine": "far_pine", "giant": "far_pine", "oak": "far_oak", "birch": "far_oak", "twisted": "far_oak", "dead": "far_dead"}
+const NEAR_RANGE := 105.0
+const FAR_RANGE := 270.0
 
 var terrain: Terrain
 var forest := FastNoiseLite.new()
 var meadow := FastNoiseLite.new()
-var meshes := {}
+var meshes := {}       # Variante -> ArrayMesh
+var heights := {}      # Variante -> Höhe
 var mats := {}
-## Ausschlusszonen (Mitte, Radius) – Gebäude, Lager, Ruine
 var keep_out: Array = []
 
 func generate(t: Terrain, exclusions: Array) -> void:
@@ -22,42 +44,140 @@ func generate(t: Terrain, exclusions: Array) -> void:
 	forest.fractal_octaves = 3
 	meadow.seed = 99
 	meadow.frequency = 1.0 / 40.0
-	_make_meshes()
-	var chunks := int(Terrain.SIZE / 64.0)
+	_load_kits()
+	meshes.patch = _patch(false, 11)
+	meshes.patch_b = _patch(false, 23)
+	meshes.patch_flower = _patch(true, 37)
+	meshes.far_pine = _pine()
+	meshes.far_oak = _oak()
+	meshes.far_dead = _dead()
+	var chunks := int(ceil(Terrain.SIZE / 64.0))
 	var shapes := 0
 	for cj in chunks:
 		for ci in chunks:
 			shapes += _chunk(ci, cj)
-	print("Vegetation: ", shapes, " Stämme mit Kollision")
+	print("Vegetation: ", shapes, " Kollisionen")
+
+# ---------- Modelle laden ----------
+
+func _load_kits() -> void:
+	for kind in KITS:
+		for v in KITS[kind]:
+			if meshes.has(v):
+				continue
+			var ps := load("res://assets/nature/%s.gltf" % v) as PackedScene
+			if ps == null:
+				push_warning("Fehlt: " + v)
+				continue
+			var root := ps.instantiate()
+			var mi := _find_mesh(root)
+			if mi == null:
+				root.free()
+				continue
+			var mesh := mi.mesh as ArrayMesh
+			for i in mesh.get_surface_count():
+				var src := mesh.surface_get_material(i)
+				if mi.get_surface_override_material(i):
+					src = mi.get_surface_override_material(i)
+				mesh.surface_set_material(i, _convert(src, kind, mesh.get_aabb().size.y))
+			meshes[v] = mesh
+			heights[v] = mesh.get_aabb().size.y
+			root.free()
+
+## Grasbüschel-Gruppe: mehrere Halm-Modelle in einem Mesh (ein Draw-Call je 16-m-Feld)
+func _patch(flowers: bool, seed: int) -> ArrayMesh:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	var by_mat := {}
+	for i in 7:
+		var v: String = ["Grass_Common_Short", "Grass_Common_Short", "Grass_Wispy_Tall"][rng.randi() % 3]
+		if flowers and i < 2:
+			v = "Flower_3_Group"
+		var src: ArrayMesh = meshes[v]
+		var target := (0.75 if v.begins_with("Grass") else 0.45) * rng.randf_range(0.6, 1.2)
+		var sc := target / maxf(0.1, float(heights[v]))
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(0.0, 1.6)
+		var xf := Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sc, sc * rng.randf_range(0.85, 1.2), sc)), Vector3(cos(a) * r, -0.05, sin(a) * r))
+		for sidx in src.get_surface_count():
+			var m := src.surface_get_material(sidx)
+			if not by_mat.has(m):
+				by_mat[m] = SurfaceTool.new()
+			(by_mat[m] as SurfaceTool).append_from(src, sidx, xf)
+	var out := ArrayMesh.new()
+	for m in by_mat:
+		var st: SurfaceTool = by_mat[m]
+		st.commit(out)
+		out.surface_set_material(out.get_surface_count() - 1, m)
+	return out
+
+func _find_mesh(n: Node) -> MeshInstance3D:
+	if n is MeshInstance3D:
+		return n
+	for c in n.get_children():
+		var r := _find_mesh(c)
+		if r:
+			return r
+	return null
+
+## Eigenes, mobilfreundliches Material aus dem importierten StandardMaterial3D
+func _convert(src: Material, kind: String, h: float) -> ShaderMaterial:
+	var sm := src as BaseMaterial3D
+	var tex: Texture2D = sm.albedo_texture if sm else null
+	var cut := sm != null and sm.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
+	var name := sm.resource_name if sm else ""
+	if name.contains("Leaves") or name.contains("Leaf") or name == "Grass" or name == "Flowers":
+		cut = true
+	var key := "%s|%s|%s" % [name, kind, cut]
+	if mats.has(key):
+		return mats[key]
+	var m := ShaderMaterial.new()
+	m.shader = CUT if cut else SOLID
+	m.set_shader_parameter("tex", tex)
+	if cut:
+		var leafy := kind in ["grass", "flower", "fern"]
+		m.set_shader_parameter("height_ref", maxf(0.8, h))
+		m.set_shader_parameter("wind", 1.8 if leafy else 1.0)
+		m.set_shader_parameter("translucency", 0.45 if leafy else 0.3)
+		match kind:
+			"pine", "giant":
+				m.set_shader_parameter("tint", Color(0.62, 0.72, 0.66))
+			"oak":
+				m.set_shader_parameter("tint", Color(0.56, 0.64, 0.5))
+			"bush":
+				m.set_shader_parameter("tint", Color(0.7, 0.76, 0.62))
+				if name.contains("Twisted"):
+					m.set_shader_parameter("hue", 1.9)
+			"birch":
+				m.set_shader_parameter("tint", Color(0.7, 0.55, 0.45))
+			"twisted":
+				m.set_shader_parameter("tint", Color(0.72, 0.42, 0.42))
+			"grass":
+				m.set_shader_parameter("tint", Color(0.52, 0.66, 0.4))
+			"fern":
+				m.set_shader_parameter("tint", Color(0.66, 0.72, 0.56))
+			_:
+				m.set_shader_parameter("tint", Color(0.85, 0.8, 0.8))
+		m.set_shader_parameter("desat", 0.32)
+	else:
+		var rocky := kind in ["rock", "boulder"]
+		m.set_shader_parameter("tint", Color(0.72, 0.72, 0.76) if rocky else Color(0.78, 0.72, 0.68))
+		m.set_shader_parameter("moss", 0.55 if rocky else 0.0)
+		m.set_shader_parameter("desat", 0.3)
+	mats[key] = m
+	return m
 
 func _mat(kind: String) -> ShaderMaterial:
 	if mats.has(kind):
 		return mats[kind]
 	var m := ShaderMaterial.new()
 	m.shader = FOLIAGE
-	match kind:
-		"grass":
-			m.set_shader_parameter("wind", 1.6)
-			m.set_shader_parameter("translucency", 0.5)
-		"rock":
-			m.set_shader_parameter("wind", 0.0)
-			m.set_shader_parameter("translucency", 0.0)
-			m.set_shader_parameter("tint_var", 0.18)
-		_:
-			m.set_shader_parameter("wind", 0.8)
+	m.set_shader_parameter("wind", 0.0 if kind == "rock" else 0.6)
+	m.set_shader_parameter("tint_var", 0.15)
 	mats[kind] = m
 	return m
 
-# ---------- Meshes ----------
-
-func _make_meshes() -> void:
-	meshes.pine = _pine()
-	meshes.oak = _oak()
-	meshes.dead = _dead()
-	meshes.bush = _bush()
-	meshes.grass = _grass()
-	meshes.rock = _rock(7)
-	meshes.boulder = _rock(13)
+# ---------- Ferne Ersatz-Meshes (prozedural) ----------
 
 func _add_cyl(st: SurfaceTool, base: Vector3, top: Vector3, r0: float, r1: float, segs: int, c0: Color, c1: Color) -> void:
 	var axis := (top - base).normalized()
@@ -224,18 +344,37 @@ func _blocked(x: float, z: float, margin: float) -> bool:
 			return true
 	return false
 
+func _pick(rng: RandomNumberGenerator, kind: String) -> String:
+	var arr: Array = KITS[kind]
+	return arr[rng.randi() % arr.size()]
+
+func _xf(rng: RandomNumberGenerator, p: Vector3, s: float, tilt := 0.0) -> Transform3D:
+	var b := Basis(Vector3.UP, rng.randf() * TAU)
+	if tilt > 0.0:
+		b = Basis.from_euler(Vector3(rng.randf_range(-tilt, tilt), rng.randf() * TAU, rng.randf_range(-tilt, tilt)))
+	return Transform3D(b.scaled(Vector3(s, s * rng.randf_range(0.9, 1.12), s)), p)
+
 func _chunk(ci: int, cj: int) -> int:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = ci * 7919 + cj * 104729 + 17
 	var x0 := -Terrain.HALF + ci * 64.0
 	var z0 := -Terrain.HALF + cj * 64.0
-	var lists := {"pine": [], "oak": [], "dead": [], "bush": [], "grass": [], "rock": [], "boulder": []}
-	var trunks: Array = []
-	var center := Vector2(x0 + 32.0, z0 + 32.0)
-	var edge := center.length()
+	var near := {}     # Variante -> [Transform]
+	var far := {}      # Fern-Mesh -> [Transform]
+	var cols: Array = []
+	var add := func(v: String, xf: Transform3D, kind: String):
+		if not near.has(v):
+			near[v] = []
+		near[v].append(xf)
+		if FAR.has(kind):
+			var fk: String = FAR[kind]
+			if not far.has(fk):
+				far[fk] = []
+			# Ersatzbaum ungefähr auf die Höhe des Modells skalieren
+			var k := float(heights.get(v, 7.0)) / 7.0
+			far[fk].append(xf.scaled_local(Vector3(k, k, k)))
 	# Bäume
-	var tries := 90
-	for i in tries:
+	for i in 85:
 		var x := x0 + rng.randf() * 64.0
 		var z := z0 + rng.randf() * 64.0
 		var y := terrain.height_at(x, z)
@@ -243,37 +382,40 @@ func _chunk(ci: int, cj: int) -> int:
 		if y < 0.8 or d > 292.0:
 			continue
 		var f := forest.get_noise_2d(x, z)
-		var dense := f > 0.08
-		if not dense and rng.randf() > 0.06:
+		if f <= 0.08 and rng.randf() > 0.06:
 			continue
 		if terrain.road_at(x, z) > 0.05 or terrain.river_dist(x, z) < 7.0 or _blocked(x, z, 4.0):
 			continue
-		var n := terrain.normal_at(x, z)
-		if n.y < 0.78:
+		if terrain.normal_at(x, z).y < 0.78:
 			continue
-		var kind := "pine"
 		var high := y > 15.0 or d > 210.0
-		var near_ruin := Vector2(x, z).distance_to(Terrain.RUIN) < 70.0
+		var near_ruin := Vector2(x, z).distance_to(Terrain.RUIN) < 70.0 or Vector2(x, z).distance_to(Terrain.SHRINE) < 40.0
 		var r := rng.randf()
+		var kind := "pine"
 		if near_ruin or d > 250.0:
-			kind = "dead" if r < 0.6 else "pine"
+			kind = "dead" if r < 0.55 else ("twisted" if r < 0.62 else "pine")
 		elif high:
-			kind = "pine" if r < 0.85 else "dead"
+			kind = "pine" if r < 0.75 else ("giant" if r < 0.88 else "dead")
 		else:
-			kind = "oak" if r < 0.45 else ("pine" if r < 0.92 else "dead")
-		var s := rng.randf_range(0.8, 1.35)
-		var xf := Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.9, 1.15), s)), Vector3(x, y - 0.1, z))
-		lists[kind].append(xf)
-		trunks.append([Vector3(x, y, z), 0.3 * s])
-		# Büsche unter Bäumen
-		if rng.randf() < 0.5:
-			var bx := x + rng.randf_range(-3, 3)
-			var bz := z + rng.randf_range(-3, 3)
+			kind = "oak" if r < 0.42 else ("pine" if r < 0.82 else ("birch" if r < 0.92 else "dead"))
+		var s := rng.randf_range(0.85, 1.3)
+		if kind == "twisted":
+			s *= 0.55
+		var v := _pick(rng, kind)
+		add.call(v, _xf(rng, Vector3(x, y - 0.15, z), s), kind)
+		cols.append([Vector3(x, y, z), (0.45 if kind == "twisted" else 0.32) * s, 4.0])
+		# Unterholz
+		if rng.randf() < 0.55:
+			var bx := x + rng.randf_range(-3.5, 3.5)
+			var bz := z + rng.randf_range(-3.5, 3.5)
 			if terrain.road_at(bx, bz) < 0.1 and not _blocked(bx, bz, 1.0) and terrain.height_at(bx, bz) > 0.6:
-				var bs := rng.randf_range(0.7, 1.4)
-				lists.bush.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * bs), terrain.ground(Vector3(bx, 0, bz))))
+				var under := "bush" if rng.randf() < 0.55 else ("fern" if rng.randf() < 0.8 else "shroom")
+				var uv := _pick(rng, under)
+				var target: float = {"bush": 1.3, "fern": 0.9, "shroom": 0.3}[under] * rng.randf_range(0.7, 1.3)
+				var us := target / maxf(0.1, float(heights.get(uv, 1.0)))
+				add.call(uv, _xf(rng, terrain.ground(Vector3(bx, 0, bz)) - Vector3(0, 0.05, 0), us), under)
 	# Felsen
-	for i in 7:
+	for i in 8:
 		var x := x0 + rng.randf() * 64.0
 		var z := z0 + rng.randf() * 64.0
 		if _blocked(x, z, 2.0) or terrain.road_at(x, z) > 0.2:
@@ -281,56 +423,76 @@ func _chunk(ci: int, cj: int) -> int:
 		var y := terrain.height_at(x, z)
 		if y < -0.5:
 			continue
-		var big := rng.randf() < 0.25 or Vector2(x, z).length() > 220.0
-		var s := rng.randf_range(1.6, 3.4) if big else rng.randf_range(0.3, 0.9)
-		var xf := Transform3D(Basis.from_euler(Vector3(rng.randf_range(-0.3, 0.3), rng.randf() * TAU, rng.randf_range(-0.3, 0.3))).scaled(Vector3(s, s * rng.randf_range(0.6, 1.1), s)), Vector3(x, y - 0.25 * s, z))
-		lists["boulder" if big else "rock"].append(xf)
+		var big := rng.randf() < 0.22 or Vector2(x, z).length() > 225.0
+		var kind := "boulder" if big else "rock"
+		var s := rng.randf_range(0.7, 1.6) if big else rng.randf_range(0.4, 1.0)
+		add.call(_pick(rng, kind), _xf(rng, Vector3(x, y - 0.3 * s, z), s, 0.25), kind)
 		if big:
-			trunks.append([Vector3(x, y, z), 0.8 * s])
-	# Gras
-	for i in 700:
-		var x := x0 + rng.randf() * 64.0
-		var z := z0 + rng.randf() * 64.0
-		var y := terrain.height_at(x, z)
-		if y < 0.5 or terrain.road_at(x, z) > 0.3 or Vector2(x, z).length() > 240.0:
-			continue
-		if meadow.get_noise_2d(x, z) < -0.25:
-			continue
-		if _blocked(x, z, -6.0):
-			continue
-		if terrain.normal_at(x, z).y < 0.82:
-			continue
-		var s := rng.randf_range(0.7, 1.4)
-		lists.grass.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.8, 1.3), s)), Vector3(x, y - 0.02, z)))
-	var ranges := {"pine": 240.0, "oak": 220.0, "dead": 220.0, "bush": 110.0, "grass": 48.0, "rock": 90.0, "boulder": 260.0}
-	for kind in lists:
-		var arr: Array = lists[kind]
-		if arr.is_empty():
-			continue
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.mesh = meshes[kind]
-		mm.instance_count = arr.size()
-		for k in arr.size():
-			mm.set_instance_transform(k, arr[k])
-		var mmi := MultiMeshInstance3D.new()
-		mmi.multimesh = mm
-		mmi.material_override = _mat("grass" if kind == "grass" else ("rock" if kind == "rock" or kind == "boulder" else "tree"))
-		mmi.visibility_range_end = ranges[kind]
-		mmi.visibility_range_end_margin = 10.0
-		if kind == "grass" or kind == "bush" or kind == "rock":
-			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(mmi)
-	if not trunks.is_empty():
+			cols.append([Vector3(x, y, z), 1.9 * s, 3.5 * s])
+	_emit(near, far, Vector3(x0 + 32.0, 0, z0 + 32.0))
+	# Gras, Blumen in 16-m-Feldern (Büschel-Gruppen)
+	for sj in 4:
+		for si in 4:
+			var gx := x0 + si * 16.0
+			var gz := z0 + sj * 16.0
+			var patches := {"patch": [], "patch_b": [], "patch_flower": []}
+			for i in 30:
+				var x := gx + rng.randf() * 16.0
+				var z := gz + rng.randf() * 16.0
+				var y := terrain.height_at(x, z)
+				if y < 0.5 or terrain.road_at(x, z) > 0.3 or Vector2(x, z).length() > 240.0:
+					continue
+				if meadow.get_noise_2d(x, z) < -0.2 or _blocked(x, z, -6.0) or terrain.normal_at(x, z).y < 0.82:
+					continue
+				var r := rng.randf()
+				var k := "patch" if r < 0.55 else ("patch_b" if r < 0.97 else "patch_flower")
+				patches[k].append(_xf(rng, Vector3(x, y, z), rng.randf_range(0.8, 1.2)))
+			for k in patches:
+				if not (patches[k] as Array).is_empty():
+					_mmi(meshes[k], patches[k], 0.0, 36.0, false)
+	if not cols.is_empty():
 		var sb := StaticBody3D.new()
 		sb.collision_layer = 1
-		for tr in trunks:
+		for c in cols:
 			var cs := CollisionShape3D.new()
 			var cy := CylinderShape3D.new()
-			cy.radius = float(tr[1])
-			cy.height = 4.0
+			cy.radius = float(c[1])
+			cy.height = float(c[2])
 			cs.shape = cy
-			cs.position = (tr[0] as Vector3) + Vector3(0, 2.0, 0)
+			cs.position = (c[0] as Vector3) + Vector3(0, float(c[2]) * 0.5, 0)
 			sb.add_child(cs)
 		add_child(sb)
-	return trunks.size()
+	return cols.size()
+
+func _emit(near: Dictionary, far: Dictionary, _center: Vector3) -> void:
+	for v: String in near:
+		var small: bool = not (v.begins_with("Pine") or v.begins_with("Common") or v.begins_with("Dead") or v.begins_with("Birch") or v.begins_with("Giant") or v.begins_with("Twisted") or v.begins_with("Rock_Big"))
+		_mmi(meshes[v], near[v], 0.0, 60.0 if small else NEAR_RANGE, not small)
+	for fk in far:
+		var mmi := _mmi(meshes[fk], far[fk], NEAR_RANGE, FAR_RANGE, false)
+		mmi.material_override = _mat("tree")
+
+func _mmi(mesh: Mesh, arr: Array, r0: float, r1: float, shadows: bool) -> MultiMeshInstance3D:
+	# Knoten in die Mitte der Instanzen setzen: die Sichtweite misst vom Knoten aus
+	var center := Vector3.ZERO
+	for xf: Transform3D in arr:
+		center += xf.origin
+	center /= maxf(1.0, arr.size())
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = arr.size()
+	for k in arr.size():
+		var xf: Transform3D = arr[k]
+		xf.origin -= center
+		mm.set_instance_transform(k, xf)
+	var mmi := MultiMeshInstance3D.new()
+	mmi.position = center
+	mmi.multimesh = mm
+	mmi.visibility_range_begin = r0
+	mmi.visibility_range_end = r1
+	mmi.visibility_range_end_margin = 8.0
+	mmi.visibility_range_begin_margin = 8.0
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
+	return mmi

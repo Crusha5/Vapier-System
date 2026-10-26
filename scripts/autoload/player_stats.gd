@@ -76,8 +76,23 @@ var invulnerable := false
 var paused_world := false
 var in_sun := 0.0      # 0..1, von der Welt gesetzt
 var night := 0.0       # von der Welt gesetzt
+var brightness := 1.0  # Geräte-Einstellung, unabhängig vom Spielstand
+signal settings_changed
+
+func load_settings() -> void:
+	var cf := ConfigFile.new()
+	if cf.load("user://settings.cfg") == OK:
+		brightness = clampf(float(cf.get_value("video", "brightness", 1.0)), 0.6, 2.2)
+
+func set_brightness(v: float) -> void:
+	brightness = clampf(v, 0.6, 2.2)
+	var cf := ConfigFile.new()
+	cf.set_value("video", "brightness", brightness)
+	cf.save("user://settings.cfg")
+	settings_changed.emit()
 
 func _ready() -> void:
+	load_settings()
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if not load_game():
 		reset_game()
@@ -102,7 +117,7 @@ func reset_game() -> void:
 		"choices": [],           # Chronik der Entscheidungen
 		"daily": {},
 		"penalty_until": 0,
-		"minutes": 21.0 * 60.0 + 30.0,
+		"minutes": 19.0 * 60.0 + 20.0,
 		"day": 1,
 		"pos": [],
 		"perfect_dashes": 0,

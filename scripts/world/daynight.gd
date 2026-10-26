@@ -21,8 +21,8 @@ var veil_mat: ShaderMaterial
 
 # Farbpaletten: [Himmel oben, Horizont, Umgebung, Nebel, Sonnenlicht]
 const DAY := [Color(0.24, 0.36, 0.56), Color(0.6, 0.63, 0.66), Color(0.5, 0.53, 0.58), Color(0.5, 0.54, 0.58), Color(1.0, 0.93, 0.82)]
-const DUSK := [Color(0.16, 0.14, 0.24), Color(0.62, 0.32, 0.24), Color(0.36, 0.28, 0.3), Color(0.38, 0.26, 0.24), Color(1.0, 0.55, 0.32)]
-const NIGHT := [Color(0.02, 0.03, 0.07), Color(0.07, 0.07, 0.11), Color(0.2, 0.24, 0.36), Color(0.05, 0.06, 0.09), Color(0.5, 0.6, 0.9)]
+const DUSK := [Color(0.18, 0.16, 0.28), Color(0.7, 0.38, 0.28), Color(0.56, 0.44, 0.46), Color(0.42, 0.3, 0.28), Color(1.0, 0.58, 0.36)]
+const NIGHT := [Color(0.05, 0.07, 0.15), Color(0.16, 0.17, 0.27), Color(0.46, 0.52, 0.72), Color(0.12, 0.14, 0.21), Color(0.62, 0.72, 1.0)]
 
 func _ready() -> void:
 	var we := WorldEnvironment.new()
@@ -56,9 +56,8 @@ func _ready() -> void:
 	add_child(we)
 	sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = 55.0
-	sun.directional_shadow_split_1 = 0.25
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 42.0
 	sun.shadow_bias = 0.04
 	sun.shadow_normal_bias = 1.2
 	sun.shadow_blur = 1.5
@@ -118,8 +117,11 @@ func is_night() -> bool:
 ## Sonnenhöhe 0..1 über dem Horizont
 func _sun_height(m: float) -> float:
 	# Sonnenaufgang 6:00, Untergang 20:00
-	var t := (m - 6.0 * 60.0) / (14.0 * 60.0)
-	return sin(clampf(t, 0.0, 1.0) * PI) if t > 0.0 and t < 1.0 else -0.2
+	# stetig: unter dem Horizont negativ (bis −0.25), keine Sprünge um 6 und 20 Uhr
+	var t := fmod(m - 6.0 * 60.0 + 24.0 * 60.0, 24.0 * 60.0) / (14.0 * 60.0)
+	if t > 1.0:
+		t = t - 24.0 * 60.0 / (14.0 * 60.0) if t > 1.36 else t
+	return clampf(sin(t * PI), -0.25, 1.0)
 
 func update(delta: float) -> void:
 	var sh := _sun_height(minutes)
@@ -138,10 +140,11 @@ func update(delta: float) -> void:
 	sky_mat.set_shader_parameter("horizon_color", pal[1])
 	sky_mat.set_shader_parameter("night", night)
 	env.ambient_light_color = pal[2]
-	env.ambient_light_energy = lerpf(0.8, 1.15, night)
+	env.ambient_light_energy = lerpf(0.9, 1.35, night)
 	env.fog_light_color = pal[3]
-	env.fog_depth_end = lerpf(320.0, 130.0, maxf(night * 0.7, rain))
-	env.fog_depth_begin = lerpf(45.0, 12.0, maxf(rain, night * 0.4))
+	env.fog_depth_end = lerpf(320.0, 170.0, maxf(night * 0.7, rain))
+	env.fog_depth_begin = lerpf(45.0, 25.0, maxf(rain, night * 0.4))
+	env.tonemap_exposure = 1.15 * PlayerStats.brightness
 	# Sonne bzw. Mond
 	var t := (minutes - 6.0 * 60.0) / (14.0 * 60.0)
 	var ang := clampf(t, -0.1, 1.1) * PI
@@ -154,9 +157,9 @@ func update(delta: float) -> void:
 	sky_mat.set_shader_parameter("sun_color", pal[4])
 	sun.look_at_from_position(Vector3.ZERO, -dir, Vector3.UP if absf(dir.y) < 0.99 else Vector3.FORWARD)
 	sun.light_color = pal[4]
-	sun.light_energy = lerpf(maxf(0.15, sh) * 1.15, 0.5, night) * (1.0 - rain * 0.45)
-	sun.shadow_opacity = lerpf(0.85, 0.5, night)
-	veil_mat.set_shader_parameter("strength", lerpf(0.3, 1.0, night))
+	sun.light_energy = lerpf(maxf(0.25, sh) * 1.2, 0.95, night) * (1.0 - rain * 0.35)
+	sun.shadow_opacity = lerpf(0.8, 0.55, night)
+	veil_mat.set_shader_parameter("strength", lerpf(0.3, 0.7, night))
 	# Wetter
 	_rain_t -= delta
 	if _rain_t <= 0.0:

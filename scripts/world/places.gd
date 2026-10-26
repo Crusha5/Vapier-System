@@ -47,6 +47,10 @@ func build(t: Terrain) -> void:
 	_lander(Vector2(150, -175))
 	for p in [Vector2(-110, -40), Vector2(30, -190), Vector2(-150, 30), Vector2(180, 90), Vector2(-40, 220)]:
 		_obelisk(p)
+	altar_core.set_meta("keep", true)
+	cage_door.set_meta("keep", true)
+	var n := Batcher.merge(self)
+	print("Orte: ", n, " Meshes zusammengefasst")
 
 func exclusions() -> Array:
 	return [[Terrain.VILLAGE, 32.0], [Terrain.BANDITS, 17.0], [Terrain.RUIN, 20.0], [Terrain.TOWER, 12.0], [Terrain.SHRINE, 7.0], [Vector2(150, -175), 10.0]]
@@ -97,59 +101,47 @@ func _light(pos: Vector3, c: Color, energy: float, rng: float, flicker := true) 
 		fires.append([l, energy])
 	return l
 
-func _house(c: Vector2, rot: float, w := 6.0, d := 5.0, tall := 2.8) -> Dictionary:
+func _house(c: Vector2, rot: float, w := 6.0, d := 5.0, _tall := 2.8) -> Dictionary:
+	# Maße auf das 2-m-Raster des Baukastens runden
+	var wi := 8 if w > 6.8 else 6
+	var di := 8 if d > 7.0 else 6
 	var base := gp(c.x, c.y)
 	var b := Basis(Vector3.UP, rot)
 	var root := Node3D.new()
 	root.position = base
 	root.rotation.y = rot
 	add_child(root)
-	# Steinsockel
-	Toon.box(root, Vector3(w + 0.3, 0.5, d + 0.3), Vector3(0, -0.13, 0), m_stone)
-	# Blockwände mit Türöffnung vorne (−Z)
-	var wall := func(size: Vector3, pos: Vector3, mt: Material):
-		Toon.box(root, size, pos, mt)
-	wall.call(Vector3(w, tall, 0.3), Vector3(0, tall * 0.5 + 0.3, d * 0.5), m_wood)
-	wall.call(Vector3(0.3, tall, d), Vector3(-w * 0.5, tall * 0.5 + 0.3, 0), m_wood)
-	wall.call(Vector3(0.3, tall, d), Vector3(w * 0.5, tall * 0.5 + 0.3, 0), m_wood)
-	var door := 1.3
-	wall.call(Vector3((w - door) * 0.5, tall, 0.3), Vector3(-(w + door) * 0.25, tall * 0.5 + 0.3, -d * 0.5), m_wood)
-	wall.call(Vector3((w - door) * 0.5, tall, 0.3), Vector3((w + door) * 0.25, tall * 0.5 + 0.3, -d * 0.5), m_wood)
-	wall.call(Vector3(door, tall - 2.1, 0.3), Vector3(0, 2.4 + (tall - 2.1) * 0.5, -d * 0.5), m_wood)
-	# Balken an den Ecken
-	for sx in [-1.0, 1.0]:
-		for sz in [-1.0, 1.0]:
-			Toon.box(root, Vector3(0.36, tall + 0.2, 0.36), Vector3(sx * w * 0.5, tall * 0.5 + 0.35, sz * d * 0.5), m_wood_dark)
-	# Satteldach
-	var rh := 1.6
-	var slope := sqrt(pow(w * 0.5 + 0.5, 2) + rh * rh)
-	var ang := atan2(rh, w * 0.5 + 0.5)
-	for sx in [-1.0, 1.0]:
-		Toon.box(root, Vector3(slope, 0.18, d + 1.0), Vector3(sx * (w * 0.25 + 0.25), tall + 0.3 + rh * 0.5, 0), m_roof, Vector3(0, 0, -sx * ang))
-	# Giebel
-	var gable := PrismMesh.new()
-	gable.size = Vector3(w, rh, 0.25)
-	for sz in [-1.0, 1.0]:
-		Toon.mesh(root, gable, m_plank, Vector3(0, tall + 0.3 + rh * 0.5, sz * d * 0.5))
-	# Fenster mit warmem Licht
-	var win := Toon.box(root, Vector3(0.7, 0.6, 0.05), Vector3(w * 0.28, 1.7, -d * 0.5 - 0.16), m_lamp)
-	win.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Innen: Bett, Tisch, Truhe, schwache Glut im Ofen
-	var bed_local := Vector3(-w * 0.5 + 0.9, 0.35, d * 0.5 - 1.3)
-	Toon.box(root, Vector3(1.0, 0.35, 2.0), bed_local + Vector3(0, 0.0, 0), m_wood_dark)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(c.x * 31.0 + c.y * 17.0)
+	# Fundament aus Stein (verdeckt Gelände-Unebenheiten)
+	var fund := Toon.box(root, Vector3(wi + 0.5, 0.9, di + 0.5), Vector3(0, -0.42, 0), m_stone)
+	fund.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var door_x := VillageKit.house(root, wi, di, "plaster" if rng.randf() < 0.6 else "brick", rng)
+	var hw := wi * 0.5
+	var hd := di * 0.5
+	# Innen: Bett, Tisch, Truhe
+	var bed_local := Vector3(-hw + 0.9, 0.35, hd - 1.4)
+	Toon.box(root, Vector3(1.0, 0.35, 2.0), bed_local, m_wood_dark)
 	Toon.box(root, Vector3(0.9, 0.12, 1.9), bed_local + Vector3(0, 0.22, 0), m_cloth)
-	Toon.box(root, Vector3(1.2, 0.08, 0.8), Vector3(w * 0.5 - 1.1, 1.0, d * 0.5 - 1.0), m_plank)
-	Toon.box(root, Vector3(0.1, 0.9, 0.1), Vector3(w * 0.5 - 1.1, 0.55, d * 0.5 - 1.0), m_wood_dark)
-	Toon.box(root, Vector3(0.9, 0.5, 0.5), Vector3(w * 0.5 - 0.7, 0.55, -d * 0.5 + 0.7), m_wood)
+	Toon.box(root, Vector3(1.2, 0.08, 0.8), Vector3(hw - 1.2, 1.0, hd - 1.1), m_plank)
+	Toon.box(root, Vector3(0.1, 0.9, 0.1), Vector3(hw - 1.2, 0.55, hd - 1.1), m_wood_dark)
+	Toon.box(root, Vector3(0.9, 0.5, 0.5), Vector3(hw - 0.8, 0.3, -hd + 0.8), m_wood)
 	var inner := OmniLight3D.new()
-	inner.position = Vector3(0, 1.8, 0.3)
+	inner.position = Vector3(0, 2.2, 0.3)
 	inner.light_color = Color(1.0, 0.6, 0.35)
-	inner.light_energy = 0.6
-	inner.omni_range = 4.5
+	inner.light_energy = 0.8
+	inner.omni_range = 5.5
 	root.add_child(inner)
-	# Kollision: drei Wände + Türwände
-	for cs in [[Vector3(w, tall, 0.4), Vector3(0, tall * 0.5, d * 0.5)], [Vector3(0.4, tall, d), Vector3(-w * 0.5, tall * 0.5, 0)], [Vector3(0.4, tall, d), Vector3(w * 0.5, tall * 0.5, 0)],
-			[Vector3((w - door) * 0.5, tall, 0.4), Vector3(-(w + door) * 0.25, tall * 0.5, -d * 0.5)], [Vector3((w - door) * 0.5, tall, 0.4), Vector3((w + door) * 0.25, tall * 0.5, -d * 0.5)]]:
+	# Kollision: Wände mit Türlücke
+	var door := 1.3
+	var lw := door_x - door * 0.5 + hw       # Länge links der Tür
+	var rw := hw - (door_x + door * 0.5)     # rechts der Tür
+	var tall := 3.2
+	var boxes := [[Vector3(wi, tall, 0.4), Vector3(0, tall * 0.5, hd - 0.1)], [Vector3(0.4, tall, di), Vector3(-hw + 0.1, tall * 0.5, 0)], [Vector3(0.4, tall, di), Vector3(hw - 0.1, tall * 0.5, 0)],
+		[Vector3(lw, tall, 0.4), Vector3(-hw + lw * 0.5, tall * 0.5, -hd + 0.1)], [Vector3(rw, tall, 0.4), Vector3(hw - rw * 0.5, tall * 0.5, -hd + 0.1)]]
+	for cs in boxes:
+		if (cs[0] as Vector3).x < 0.05:
+			continue
 		var sb := StaticBody3D.new()
 		var col := CollisionShape3D.new()
 		var sh := BoxShape3D.new()
@@ -160,12 +152,12 @@ func _house(c: Vector2, rot: float, w := 6.0, d := 5.0, tall := 2.8) -> Dictiona
 		sb.rotation.y = rot
 		add_child(sb)
 	var info := {
-		"door_out": base + b * Vector3(0, 0, -d * 0.5 - 1.2),
-		"door_in": base + b * Vector3(0, 0, -d * 0.5 + 0.9),
+		"door_out": base + b * Vector3(door_x, 0, -hd - 1.2),
+		"door_in": base + b * Vector3(door_x, 0, -hd + 1.0),
 		"bed": base + b * (bed_local + Vector3(0, -0.35, 0)),
 		"bed_rot": rot,
 		"center": base,
-		"rect": [base, rot, w, d],
+		"rect": [base, rot, float(wi), float(di)],
 	}
 	if not spots.has("houses"):
 		spots.houses = []
@@ -249,7 +241,38 @@ func _lantern(p: Vector3) -> void:
 	_light(p + Vector3(0.62, 2.2, 0), Color(1.0, 0.7, 0.4), 1.2, 7.0)
 
 func _crate(p: Vector3, s := 1.0, rot := 0.0) -> void:
-	_box(Vector3(0.9, 0.8, 0.9) * s, p + Vector3(0, 0.4 * s, 0), m_plank, Vector3(0, rot, 0))
+	VillageKit.piece(self, "Prop_Crate", p, rot, 0.8 * s)
+	var sb := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var sh := BoxShape3D.new()
+	sh.size = Vector3(0.86, 0.85, 0.86) * s
+	cs.shape = sh
+	sb.add_child(cs)
+	sb.position = p + Vector3(0, 0.42 * s, 0)
+	sb.rotation.y = rot
+	add_child(sb)
+
+func _wagon(p: Vector3, rot: float) -> void:
+	VillageKit.piece(self, "Prop_Wagon", p, rot)
+	var sb := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var sh := BoxShape3D.new()
+	sh.size = Vector3(1.9, 1.4, 3.0)
+	cs.shape = sh
+	cs.position = Vector3(0, 0.7, -1.1)
+	sb.add_child(cs)
+	sb.position = p
+	sb.rotation.y = rot
+	add_child(sb)
+
+func _fence(a: Vector3, b: Vector3) -> void:
+	var dir := b - a
+	var n := int(ceil(Vector2(dir.x, dir.z).length() / 2.05))
+	for i in n:
+		var t := (i + 0.5) / n
+		var p := a.lerp(b, t)
+		p = gp(p.x, p.z)
+		VillageKit.piece(self, "Prop_WoodenFence_Single", p, -atan2(dir.z, dir.x))
 
 func _barrel(p: Vector3) -> void:
 	_cyl(0.32, 0.36, 0.95, p + Vector3(0, 0.47, 0), m_wood, 8, Vector3.ZERO, true)
@@ -400,6 +423,11 @@ func _village() -> void:
 		_crate(gp(c.x + p.x, c.y + p.y), randf_range(0.8, 1.1), randf())
 	for p in [Vector2(15.4, 12.4), Vector2(-11, -7.5), Vector2(-10.2, -6.5)]:
 		_barrel(gp(c.x + p.x, c.y + p.y))
+	_wagon(gp(c.x + 6, c.y - 9), 0.7)
+	_wagon(gp(c.x + 36, c.y - 22), -0.3)
+	# Zäune an den Feldern
+	_fence(gp(c.x + 38, c.y - 20), gp(c.x + 54, c.y - 20))
+	_fence(gp(c.x + 38, c.y + 16), gp(c.x + 54, c.y + 16))
 	# Felder vor dem Dorf
 	var field_m := Toon.mat(Color(0.32, 0.27, 0.15), {"grime": 0.9})
 	for k in 3:
@@ -507,6 +535,7 @@ func _obelisk(c: Vector2) -> void:
 # ---------- Laufzeit ----------
 
 func tick(delta: float, night: float) -> void:
+	VillageKit.set_night(night)
 	_t += delta
 	for f in fires:
 		var l: OmniLight3D = f[0]
