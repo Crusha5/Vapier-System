@@ -254,6 +254,13 @@ func _build_water() -> void:
 	water.mesh = pm
 	var wm := ShaderMaterial.new()
 	wm.shader = preload("res://shaders/water.gdshader")
+	# Höhenkarte für Ufer-Schaum und Wassertiefe
+	var img := Image.create(N, N, false, Image.FORMAT_RF)
+	for j in N:
+		for i in N:
+			img.set_pixel(i, j, Color(h[j * N + i] - WATER_Y, 0, 0))
+	wm.set_shader_parameter("height_tex", ImageTexture.create_from_image(img))
+	wm.set_shader_parameter("world_size", SIZE)
 	water.material_override = wm
 	water.position.y = WATER_Y
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

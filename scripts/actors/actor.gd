@@ -213,6 +213,9 @@ func _think(_delta: float, _dist: float) -> void:
 
 func _animate(delta: float) -> void:
 	if model is Humanoid:
-		(model as Humanoid).animate(delta, _anim_speed)
+		var h := model as Humanoid
+		var d: float = global_position.distance_to(world.player.global_position)
+		h.lod = 0 if d < 22.0 else (1 if d < 40.0 else 2)
+		h.animate(delta, _anim_speed)
 	elif model and model.has_method("animate"):
 		model.animate(delta, _anim_speed)

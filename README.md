@@ -4,6 +4,15 @@ Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisi
 
 **Veyra** – eine Kolonie, seit zwölf Jahren vom **Schleier** (einem roten Sturm) von der Erde abgeschnitten. Soldat **Kael** hat sich geweigert, das Dorf Morrow niederzubrennen. Kommandant Varek hat ihn erschossen und in den Ruinen der Alten liegen lassen. Dort erweckt ihn **die Erste Nacht** – als Blutgeborenen, mit einem Protokoll im Kopf.
 
+## v0.5 – Echte Figuren, Atmosphäre, Grafikstufen
+
+- **Figuren** aus Quaternius' Universal Base Characters + Modular Character Outfits (CC0): Kael im dunklen Kapuzenmantel, Dorfbewohner als Bauern, Wirtin, Schmied, Banditen mit roten Tüchern, Wacht in Rüstung mit Helm, Krähe im Knochenkragen. Haare, Bärte, Strohhut, Schwerter, Armbrust.
+- **Animationen** aus der Universal Animation Library 1+2 (CC0): Gehen, Laufen, Sprinten, Schwertkombos, Treffer, Tod, Sitzen am Feuer, Schlafen, Knien, Weinen, Reden, Feldarbeit, Biss beim Trinken.
+- **Atmosphäre:** Wolken, Farbstimmung, Bodennebel bei Nacht und Morgengrauen, Wasser mit Tiefe und Ufer-Schaum.
+- **Orte:** Stein-, Holz- und Ziegeltexturen auf Ruine, Palisaden und Turm; neuer runder Wachturm mit Ziegelhaube; Bänke, Fässer, Truhe, Karren, Laternen; Felsen und Ranken an der Ruine.
+- **Dichte:** mehr Gras, Büsche, Farne, Blumen und Pilze.
+- **Grafikstufen** Niedrig/Mittel/Hoch (Titel und Systemmenü).
+
 ## v0.4 – Grafik-Umbau
 
 - Echte Modelle statt Bastelformen: Bäume, Büsche, Farne, Gras, Felsen und Pilze aus dem **Stylized Nature MegaKit**, Häuser, Wagen, Kisten und Zäune aus dem **Medieval Village MegaKit** (beide von Quaternius, CC0), düster eingefärbt.
@@ -28,6 +37,8 @@ Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisi
 
 - Quaternius – Stylized Nature MegaKit (CC0 1.0), `assets/nature/`
 - Quaternius – Medieval Village MegaKit (CC0 1.0), `assets/village/`
+- Quaternius – Universal Base Characters, Modular Character Outfits – Fantasy, Universal Animation Library 1+2 (CC0 1.0), `assets/chars/` – aufbereitet über [moritzbrantner/asset-tooling](https://github.com/moritzbrantner/asset-tooling)
+- Quaternius – Fantasy-Requisiten (Greyhaven-Starter, CC0 1.0), `assets/props/`
 
 ## Build
 

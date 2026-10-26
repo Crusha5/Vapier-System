@@ -149,6 +149,7 @@ func _kv(k: String, v: String, vc := H.FG) -> HBoxContainer:
 func _status() -> void:
 	var s := PlayerStats.s
 	body.add_child(brightness_row(rebuild))
+	body.add_child(quality_row(rebuild))
 	var head := H.hbox(14)
 	body.add_child(head)
 	var l := H.vbox(2)
@@ -415,4 +416,18 @@ static func brightness_row(after: Callable) -> HBoxContainer:
 		PlayerStats.set_brightness(PlayerStats.brightness + 0.15)
 		after.call())
 	h.add_child(plus)
+	return h
+
+## Grafikstufe
+static func quality_row(after: Callable) -> HBoxContainer:
+	var h := H.hbox(6)
+	var l := H.lbl("GRAFIK", 12, H.MUTED, H.F_SEMI)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(l)
+	for q in 3:
+		var b := H.btn(PlayerStats.QUALITY_NAMES[q], func():
+			PlayerStats.set_quality(q)
+			after.call(), "TabOn" if PlayerStats.quality == q else "Tab")
+		b.custom_minimum_size = Vector2(74, 30)
+		h.add_child(b)
 	return h

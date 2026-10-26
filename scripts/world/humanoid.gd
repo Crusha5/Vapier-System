@@ -1,427 +1,458 @@
 class_name Humanoid
 extends Node3D
-## Mensch mit durchgehendem, geskinntem Körper (BodyBuilder) und Skelett.
-## Prozedurale Animation über Knochen-Rotationen. Blickrichtung ist −Z.
+## Figur aus den Quaternius-Baukästen (Universal Base Characters + Modular Character Outfits, CC0)
+## mit echten Animationen aus der Universal Animation Library 1+2 (CC0).
+## Gleiche Schnittstelle wie früher: play(action, n), animate(delta, speed, action_len), add_blade(), …
+## look: {body, hair, hair_color, beard, hat, armor, faction, cloth, skin_tone, scale, idle, female}
+
+const ANIMS := preload("res://assets/chars/anims.res")
+## Halte-Aktionen enden nicht von selbst
+const HOLD := ["windup", "kneel", "sit", "lie", "feed", "cower", "sleep", "talk", "work"]
+## Aktion -> [Animation, Modus, Ende-Anteil]; Modi: once, loop, hold (bis zum Ende, dann stehen), scrub (bis Anteil, dann stehen)
+const MAP := {
+	"attack": ["Sword_Regular_A", "once", 1.0],
+	"windup": ["Sword_Heavy_A", "scrub", 0.32],
+	"dash": ["Sword_Dash", "once", 1.0],
+	"cast": ["Spell_Simple_Shoot", "once", 1.0],
+	"hurt": ["Hit_Chest", "once", 1.0],
+	"talk": ["Idle_Talking", "loop", 1.0],
+	"kneel": ["PickUp_Kneeling", "scrub", 0.42],
+	"cower": ["Crying", "loop", 1.0],
+	"sit": ["GroundSit_Idle", "loop", 1.0],
+	"lie": ["IdleToLay", "hold", 1.0],
+	"sleep": ["IdleToLay", "hold", 1.0],
+	"feed": ["Zombie_Bite", "scrub", 0.55],
+	"dead": ["Death01", "hold", 1.0],
+	"spit": ["Hit_Head", "once", 1.0],
+	"drink": ["Drink", "once", 1.0],
+	"work": ["Farm_Harvest", "loop", 1.0],
+}
+const COMBO := ["Sword_Regular_A", "Sword_Regular_B", "Sword_Regular_C"]
+const SKIN_MATS := ["MI_Superhero_Male", "MI_Regular_Male", "MI_Superhero_Female", "MI_Regular_Female"]
+const HAIR_MATS := ["MI_Hair_1", "MI_Hair_2"]
+
+static var _scenes := {}
 
 var look := {}
+var rig: Node3D            # importierte Figur (um 180° gedreht: unsere Vorderseite ist −Z)
 var skel: Skeleton3D
+var anim: AnimationPlayer
 var body: MeshInstance3D
 var eyes: MeshInstance3D
 var hand_r: BoneAttachment3D
 var hand_l: BoneAttachment3D
 var blade: MeshInstance3D
 var blade_l: MeshInstance3D
-var bi := {}
-var surfaces: Array = []
-
-var phase := 0.0
-var move_amt := 0.0
-## Aktionen: "", "attack", "dash", "hurt", "cast", "windup", "dead", "talk"
+var meshes: Array[GeometryInstance3D] = []
+var skin_mats: Array[StandardMaterial3D] = []
+var eye_mat: StandardMaterial3D
 var action := ""
 var action_t := 0.0
 var combo := 0
-var _breath := 0.0
-var _idle_t := 0.0
-var lean := 0.0          # Dauerhaftes Vorbeugen (z. B. Mutant)
-var weapon_pose := true  # Klinge vor dem Körper halten
-const HOLD := ["windup", "kneel", "sit", "lie", "feed", "cower", "sleep"]
+var move_amt := 0.0
+var lean := 0.0
+var weapon_pose := true
 var bed_height := 0.0
+var idle_anim := "Idle"
+var _cur := ""
+var _prev_action := ""
+var _getup := 0.0
+var _blade_len := 0.9
+var _blade_len_l := 0.6
+var _shadow_only := false
+var _attachments := {}
+var lod := 0               # 0 nah, 1 mittel, 2 fern: Animation seltener auswerten
+var _acc := 0.0
+var _frame := 0
+var combat_t := 0.0        # > 0: Waffe gezogen
+var always_drawn := false
+var _drawn := true
+var _blade_holder: Node3D
 
 func _init(cfg := {}) -> void:
-	look = {
-		"skin": Color(0.9, 0.74, 0.66), "suit": Color(0.14, 0.15, 0.2), "accent": Toon.RED,
-		"hair": Color(0.08, 0.07, 0.09), "eyes": Color(0.9, 0.95, 1.0), "glow": 0.0,
-		"scale": 1.0, "bulk": 1.0, "coat": false, "cape": false, "vest": false, "pads": false, "visor": false,
-		"hair_style": "short",
-	}
-	for k in cfg:
-		look[k] = cfg[k]
-	if not look.has("suit2"):
-		look["suit2"] = (look.suit as Color).darkened(0.45)
-	if not look.has("cape_color"):
-		look["cape_color"] = (look.accent as Color).darkened(0.55)
-	if not look.has("metal"):
-		look["metal"] = Color(0.55, 0.57, 0.63)
+	look = cfg
 
 func _ready() -> void:
 	_build()
 
-func _rim(c: Color) -> float:
-	return 0.38 * (1.0 - clampf(c.get_luminance() * 1.1, 0.0, 0.85))
-
-func _surf_mat(s: String) -> Material:
-	var base := {"outline": 0.022, "rim": _rim(look.suit)}
-	match s:
-		"skin":
-			return Toon.amat(look.skin, {"outline": 0.02, "rim": 0.12, "rim_color": Color(1.0, 0.6, 0.6)})
-		"suit":
-			return Toon.amat(look.suit, base)
-		"dark":
-			return Toon.amat(look.suit2, {"outline": 0.022, "rim": _rim(look.suit2), "spec": 0.4})
-		"accent":
-			var ag: float = look.get("accent_glow", 1.4)
-			if ag <= 0.0:
-				return Toon.amat(look.accent, {"outline": 0.012, "rough": 0.7})
-			return Toon.amat(look.accent, {"emit": look.accent, "energy": ag, "outline": 0.012})
-		"hair":
-			return Toon.amat(look.hair, {"outline": 0.024, "rim": 0.5, "spec": 0.5})
-		"metal":
-			return Toon.amat(look.metal, {"outline": 0.022, "spec": 0.9, "rim": 0.3})
-		"cape":
-			return Toon.amat(look.cape_color, {"outline": 0.022, "rim": _rim(look.cape_color)})
-	return Toon.amat(Color.MAGENTA)
+static func _scene(name: String) -> PackedScene:
+	if not _scenes.has(name):
+		_scenes[name] = load("res://assets/chars/%s.gltf" % name)
+	return _scenes[name]
 
 func _build() -> void:
-	scale = Vector3.ONE * float(look.scale)
-	var bk: float = look.bulk
-	skel = Skeleton3D.new()
-	add_child(skel)
-	for i in BodyBuilder.BONES.size():
-		var b: Array = BodyBuilder.BONES[i]
-		skel.add_bone(b[0])
-		bi[b[0]] = i
-		if int(b[1]) >= 0:
-			skel.set_bone_parent(i, int(b[1]))
-		skel.set_bone_rest(i, Transform3D(Basis(), BodyBuilder.bone_rest(i, bk)))
-	skel.reset_bone_poses()
-	var res := BodyBuilder.build(look)
-	body = MeshInstance3D.new()
-	body.mesh = res.mesh
-	var surfs: Array = res.surfaces
-	surfaces = surfs
-	for i in surfs.size():
-		body.set_surface_override_material(i, _surf_mat(surfs[i]))
-	skel.add_child(body)
-	body.skin = skel.create_skin_from_rest_transforms()
-	body.skeleton = NodePath("..")
-	# Augen (leuchtend, eigenes Material zum Umschalten)
-	var head_att := BoneAttachment3D.new()
-	head_att.bone_name = "head"
-	skel.add_child(head_att)
-	eyes = MeshInstance3D.new()
-	var em := ArrayMesh.new()
-	var stt := SurfaceTool.new()
-	stt.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for sx in [-1.0, 1.0]:
-		# schräg gestellte Anime-Augen als flache Rauten
-		var c := Vector3(0.044 * sx, 0.142, -0.122)
-		var pts := [c + Vector3(-0.022 * sx, 0.006, 0), c + Vector3(0.02 * sx, 0.012, -0.002), c + Vector3(0.019 * sx, -0.008, 0), c + Vector3(-0.018 * sx, -0.006, 0.002)]
-		for tri in [[0, 1, 2], [0, 2, 3]]:
-			var a: Vector3 = pts[tri[0]]
-			var b2: Vector3 = pts[tri[1]]
-			var c2: Vector3 = pts[tri[2]]
-			if ((c2 - a).cross(b2 - a)).z > 0.0:
-				var tmp := b2
-				b2 = c2
-				c2 = tmp
-			for v in [a, b2, c2]:
-				stt.set_normal(Vector3.FORWARD)
-				stt.add_vertex(v)
-	stt.commit(em)
-	eyes.mesh = em
-	eyes.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	head_att.add_child(eyes)
-	set_eye_glow(look.eyes, look.glow)
-	hand_r = BoneAttachment3D.new()
-	hand_r.bone_name = "hand.R"
-	skel.add_child(hand_r)
-	hand_l = BoneAttachment3D.new()
-	hand_l.bone_name = "hand.L"
-	skel.add_child(hand_l)
+	var body_name: String = look.get("body", "male.outfit.farmer.lod1")
+	var ps := _scene(body_name)
+	if ps == null:
+		ps = _scene("male.outfit.farmer.lod1")
+	rig = ps.instantiate() as Node3D
+	rig.rotation.y = PI
+	var sc: float = look.get("scale", 1.0)
+	rig.scale = Vector3.ONE * sc
+	add_child(rig)
+	skel = rig.find_children("*", "Skeleton3D", true, false)[0] as Skeleton3D
+	for mi in skel.find_children("*", "MeshInstance3D", true, false):
+		meshes.append(mi)
+		if mi.name == "Eyes":
+			eyes = mi
+		elif body == null or mi.name.begins_with("SuperHero"):
+			body = mi
+	_apply_materials()
+	# Haare, Bart, Rüstung, Kopfbedeckung an Knochen hängen
+	var hat: String = look.get("hat", "")
+	if look.get("hair", "") != "" and hat == "":
+		_attach_scene(look.hair, "head.hair", [])
+	if look.get("beard", "") != "":
+		_attach_scene("facial-hair.beards.default", "head.armor", [look.beard])
+	if look.get("armor", "") != "":
+		_attach_armor(look.armor)
+	if hat != "":
+		_attach_scene(hat, "head.armor", [])
+	anim = AnimationPlayer.new()
+	anim.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+	rig.add_child(anim)
+	anim.add_animation_library("", ANIMS)
+	idle_anim = look.get("idle", "Idle")
+	_play(idle_anim, 0.0)
+	anim.seek(randf() * 2.0, true)
+	_frame = randi() % 4
 
-## Blut-/Energieklinge an der rechten (oder linken) Hand
-func add_blade(color: Color, length := 0.9, width := 0.05) -> void:
+## Materialien je Figur: Haut, Haare, Fraktionsfarbe, Kleidung tönen
+func _apply_materials() -> void:
+	var tone: Color = look.get("skin_tone", Color(1, 1, 1))
+	var hair_c: Color = look.get("hair_color", Color(0.18, 0.1, 0.05))
+	var faction: Color = look.get("faction", Color(-1, 0, 0))
+	var cloth: Color = look.get("cloth", Color(1, 1, 1))
+	var accent: Color = look.get("accent", Color(-1, 0, 0))
+	for g in meshes:
+		var mi := g as MeshInstance3D
+		for i in mi.mesh.get_surface_count():
+			var m := mi.get_active_material(i) as StandardMaterial3D
+			if m == null:
+				continue
+			var n := m.resource_name
+			var nm := m.duplicate() as StandardMaterial3D
+			nm.metallic_specular = 0.3
+			if n in SKIN_MATS:
+				nm.albedo_color = m.albedo_color * tone
+				skin_mats.append(nm)
+			elif n in HAIR_MATS:
+				nm.albedo_color = hair_c
+			elif n == "MI_Eyes":
+				eye_mat = nm
+			elif n == "faction" and faction.r >= 0.0:
+				nm.albedo_color = faction
+			elif n == "class" and accent.r >= 0.0:
+				nm.albedo_color = accent
+			else:
+				nm.albedo_color = m.albedo_color * cloth
+			mi.set_surface_override_material(i, nm)
+
+func _socket(id: String) -> Array:
+	var tab: Dictionary = CharData.SOCKETS_FEMALE if look.get("female", false) else CharData.SOCKETS_MALE
+	return tab.get(id, [])
+
+func _bone_attach(bone: String) -> BoneAttachment3D:
+	if _attachments.has(bone):
+		return _attachments[bone]
+	var ba := BoneAttachment3D.new()
+	ba.bone_name = bone
+	skel.add_child(ba)
+	_attachments[bone] = ba
+	return ba
+
+## Szene an einen Socket hängen; only: nur diese Knoten behalten (leer = alle)
+func _attach_scene(name: String, socket: String, only: Array) -> Node3D:
+	var ps := _scene(name)
+	var s := _socket(socket)
+	if ps == null or s.is_empty():
+		return null
+	var holder := Node3D.new()
+	holder.transform = Transform3D(Basis(s[2] as Quaternion), s[1])
+	_bone_attach(s[0]).add_child(holder)
+	var inst := ps.instantiate() as Node3D
+	holder.add_child(inst)
+	if not only.is_empty():
+		for c in inst.get_children():
+			if not (c.name in only):
+				c.queue_free()
+	for mi in inst.find_children("*", "MeshInstance3D", true, false):
+		if only.is_empty() or mi.name in only:
+			meshes.append(mi)
+			_tint_attached(mi)
+	return inst
+
+func _tint_attached(mi: MeshInstance3D) -> void:
+	var hair_c: Color = look.get("hair_color", Color(0.18, 0.1, 0.05))
+	var faction: Color = look.get("faction", Color(-1, 0, 0))
+	for i in mi.mesh.get_surface_count():
+		var m := mi.get_active_material(i) as StandardMaterial3D
+		if m == null:
+			continue
+		var nm := m.duplicate() as StandardMaterial3D
+		if m.resource_name in HAIR_MATS:
+			nm.albedo_color = hair_c
+		elif m.resource_name == "faction" and faction.r >= 0.0:
+			nm.albedo_color = faction
+		mi.set_surface_override_material(i, nm)
+
+## Rüstungsset: jedes Teil an seinen eigenen Socket
+func _attach_armor(name: String) -> void:
+	var ps := _scene(name)
+	if ps == null:
+		return
+	var src := ps.instantiate() as Node3D
+	for c in src.get_children():
+		var sock: String = CharData.PIECES.get(String(c.name), "")
+		if sock == "":
+			continue
+		var s := _socket(sock)
+		if s.is_empty():
+			continue
+		var holder := Node3D.new()
+		holder.transform = Transform3D(Basis(s[2] as Quaternion), s[1])
+		_bone_attach(s[0]).add_child(holder)
+		src.remove_child(c)
+		holder.add_child(c)
+		for mi in ([c] if c is MeshInstance3D else []) + c.find_children("*", "MeshInstance3D", true, false):
+			meshes.append(mi)
+			_tint_attached(mi)
+	src.free()
+
+# ---------- Waffen ----------
+
+func _weapon_mesh(name: String) -> Mesh:
+	var ps := _scene(name)
+	if ps == null:
+		return null
+	var inst := ps.instantiate()
+	var mis := inst.find_children("*", "MeshInstance3D", true, false)
+	var m: Mesh = (mis[0] as MeshInstance3D).mesh if not mis.is_empty() else null
+	var off: Vector3 = (mis[0] as Node3D).position if not mis.is_empty() else Vector3.ZERO
+	inst.free()
+	if m and off != Vector3.ZERO:
+		# Modell-Versatz (Griff im Ursprung) in die Geometrie übernehmen
+		var st := SurfaceTool.new()
+		var am := ArrayMesh.new()
+		for i in m.get_surface_count():
+			st.clear()
+			st.append_from(m, i, Transform3D(Basis(), off))
+			st.commit(am)
+			am.surface_set_material(i, m.surface_get_material(i))
+		return am
+	return m
+
+func _make_weapon(left: bool, color: Color, length: float) -> MeshInstance3D:
+	var dagger := length < 0.7
+	var mesh_name := "equipment.dagger.blackened.default" if dagger else "equipment.sword.arming.default"
+	if look.get("weapon", "") != "":
+		mesh_name = look.weapon
+	var mi := MeshInstance3D.new()
+	mi.mesh = _weapon_mesh(mesh_name)
+	var base_len := 0.45 if dagger else 0.9
+	var k := clampf(length / base_len, 0.6, 1.6)
+	mi.scale = Vector3(1.0, k, 1.0)
+	# Blutklinge: rotes Leuchten über dem Stahl
+	if color.r > color.g * 2.5 and color.r > 0.6:
+		var ov := StandardMaterial3D.new()
+		ov.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ov.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		ov.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		ov.albedo_color = Color(color.r, color.g, color.b, 0.3)
+		mi.material_overlay = ov
+		mi.set_meta("base_overlay", ov)
+	var sock := "hand_l.weapon" if left else "hand_r.weapon"
+	if mesh_name.contains("crossbow"):
+		sock = "hand_r.crossbow"
+		k = 1.0
+		mi.scale = Vector3.ONE
+	var s := _socket(sock)
+	var holder := Node3D.new()
+	holder.transform = Transform3D(Basis(s[2] as Quaternion), s[1])
+	_bone_attach(s[0]).add_child(holder)
+	holder.add_child(mi)
+	meshes.append(mi)
+	return mi
+
+func add_blade(color: Color, length := 0.9, _width := 0.05) -> void:
+	if skel == null:
+		_build_deferred_blade.call_deferred(color, length, false)
+		return
 	if blade:
-		(blade.get_meta("hilt") as Node).queue_free()
-		blade.queue_free()
-	blade = _make_blade(hand_r, color, length, width)
+		blade.get_parent().queue_free()
+	blade = _make_weapon(false, color, length)
+	_blade_len = length
+	_blade_holder = blade.get_parent() as Node3D
+	hand_r = _blade_holder.get_parent() as BoneAttachment3D
+	_drawn = true
+	_set_drawn(always_drawn or combat_t > 0.0)
+	if _shadow_only:
+		set_shadow_only(true)
 
-func add_blade_left(color: Color, length := 0.6, width := 0.04) -> void:
+func _build_deferred_blade(color: Color, length: float, left: bool) -> void:
+	if left:
+		add_blade_left(color, length)
+	else:
+		add_blade(color, length)
+
+func add_blade_left(color: Color, length := 0.6, _width := 0.04) -> void:
+	if skel == null:
+		_build_deferred_blade.call_deferred(color, length, true)
+		return
 	remove_blade_left()
-	blade_l = _make_blade(hand_l, color, length, width)
+	blade_l = _make_weapon(true, color, length)
+	_blade_len_l = length
+	hand_l = blade_l.get_parent().get_parent() as BoneAttachment3D
 
 func remove_blade_left() -> void:
 	if blade_l:
-		(blade_l.get_meta("hilt") as Node).queue_free()
-		blade_l.queue_free()
+		blade_l.get_parent().queue_free()
+		meshes.erase(blade_l)
 		blade_l = null
-
-func _make_blade(hand: Node3D, color: Color, length: float, width: float) -> MeshInstance3D:
-	var b := MeshInstance3D.new()
-	var bm := PrismMesh.new()
-	bm.size = Vector3(width * 1.6, length, 0.03)
-	b.mesh = bm
-	b.material_override = Toon.amat(color, {"emit": color, "energy": 2.4, "outline": 0.016})
-	b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Klinge zeigt in Handrichtung nach vorne
-	b.rotation = Vector3(-PI * 0.5, 0, 0)
-	b.position = Vector3(0, -0.08, -length * 0.5 + 0.02)
-	hand.add_child(b)
-	var hilt := MeshInstance3D.new()
-	var hb := BoxMesh.new()
-	hb.size = Vector3(0.12, 0.03, 0.04)
-	hilt.mesh = hb
-	hilt.material_override = Toon.amat(Color(0.12, 0.12, 0.15), {"outline": 0.012, "spec": 0.8})
-	hilt.position = Vector3(0, -0.08, 0.02)
-	hand.add_child(hilt)
-	b.set_meta("hilt", hilt)
-	return b
 
 func set_blade_visible(v: bool) -> void:
 	for b in [blade, blade_l]:
 		if b:
 			b.visible = v
-			(b.get_meta("hilt") as Node3D).visible = v
 
 func blade_tip(left := false) -> Vector3:
 	var b := blade_l if left else blade
 	if b == null:
 		return global_position + Vector3(0, 1.2, 0)
-	return b.global_transform * Vector3(0, 0.5 * (b.mesh as PrismMesh).size.y, 0)
+	return b.global_transform * Vector3(0, 0.95, 0)
 
 func blade_base(left := false) -> Vector3:
 	var b := blade_l if left else blade
 	if b == null:
 		return global_position + Vector3(0, 1.0, 0)
-	return b.global_transform * Vector3(0, -0.3 * (b.mesh as PrismMesh).size.y, 0)
+	return b.global_transform * Vector3(0, 0.2, 0)
 
-## Hautfarbe zur Laufzeit ändern (z. B. Blässe je nach Menschlichkeit)
+## Waffe in der Hand oder an der Hüfte
+func _set_drawn(v: bool) -> void:
+	if v == _drawn or _blade_holder == null:
+		return
+	_drawn = v
+	var sock := "hand_r.weapon" if v else "hip_l.stowed"
+	if look.get("weapon", "").contains("crossbow"):
+		sock = "hand_r.crossbow" if v else "back.bow.stowed"
+	var s := _socket(sock)
+	if s.is_empty():
+		return
+	_blade_holder.get_parent().remove_child(_blade_holder)
+	_bone_attach(s[0]).add_child(_blade_holder)
+	_blade_holder.transform = Transform3D(Basis(s[2] as Quaternion), s[1])
+	if blade_l:
+		blade_l.visible = v
+	# Blutschimmer nur mit gezogener Klinge
+	if blade and blade.has_meta("base_overlay"):
+		blade.material_overlay = blade.get_meta("base_overlay") if v else null
+
+# ---------- Aussehen zur Laufzeit ----------
+
+## Blässe: Hautfarbe relativ zur normalen Haut
 func set_skin(c: Color) -> void:
-	look.skin = c
-	var i := surfaces.find("skin")
-	if i >= 0:
-		body.set_surface_override_material(i, _surf_mat("skin"))
+	var base := Color(0.88, 0.74, 0.66)
+	var tone: Color = look.get("skin_tone", Color(1, 1, 1))
+	var k := Color(c.r / base.r, c.g / base.g, c.b / base.b)
+	for m in skin_mats:
+		m.albedo_color = Color(tone.r * k.r, tone.g * k.g, tone.b * k.b)
 
 ## Ego-Perspektive: Körper wirft nur noch Schatten
 func set_shadow_only(v: bool) -> void:
-	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if v else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	eyes.visible = not v
-	for b in [blade, blade_l]:
-		if b:
-			b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if v else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			(b.get_meta("hilt") as GeometryInstance3D).cast_shadow = b.cast_shadow
+	_shadow_only = v
+	for g in meshes:
+		if is_instance_valid(g):
+			g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if v else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 
 func set_eye_glow(color: Color, energy: float) -> void:
-	eyes.material_override = Toon.amat(color, {"emit": color, "energy": energy})
+	if eye_mat == null:
+		return
+	eye_mat.emission_enabled = energy > 0.5
+	eye_mat.emission = color
+	eye_mat.emission_energy_multiplier = maxf(0.0, energy - 0.5) * 1.2
+
+# ---------- Animation ----------
 
 func play(a: String, n := 0) -> void:
-	if action == "lie" or action == "sleep" or action == "dead":
-		rotation.x = 0.0
-		position.y = 0.0
+	if a in ["attack", "windup", "dash", "cast", "hurt"]:
+		combat_t = 7.0
+		_set_drawn(true)
+	if (action == "lie" or action == "sleep") and a == "":
+		_getup = 1.4
+	_prev_action = action
 	action = a
 	action_t = 0.0
 	combo = n
+	if a != "" and MAP.has(a):
+		var e: Array = MAP[a]
+		var name: String = e[0]
+		if a == "attack":
+			name = COMBO[n % COMBO.size()]
+		elif a == "work":
+			name = look.get("work", "Farm_Harvest")
+		_play(name, 0.12 if a in ["attack", "hurt", "dash"] else 0.25)
+		if e[1] == "scrub":
+			anim.pause()
+	elif a == "" and _getup > 0.0:
+		_play("LayToIdle", 0.1)
 
-func _r(name: String, e: Vector3) -> void:
-	skel.set_bone_pose_rotation(bi[name], Quaternion.from_euler(e))
+func _play(name: String, blend: float) -> void:
+	if anim == null or not anim.has_animation(name):
+		return
+	_cur = name
+	anim.play(name, blend)
 
 func animate(delta: float, speed: float, action_len := 0.3) -> void:
-	if skel == null:
+	if anim == null:
 		return
+	# Animation selbst weiterschalten (fern seltener)
+	_acc += delta
+	_frame += 1
+	var step := 1 if lod == 0 else (2 if lod == 1 else 4)
+	if _frame % step == 0:
+		anim.advance(_acc)
+		_acc = 0.0
+	if combat_t > 0.0:
+		combat_t -= delta
+	_set_drawn(always_drawn or combat_t > 0.0)
 	move_amt = lerpf(move_amt, clampf(speed / 5.0, 0.0, 1.4), minf(1.0, delta * 10.0))
-	phase += delta * (4.0 + speed * 1.6)
-	_breath += delta * 2.0
-	_idle_t += delta
+	position.y = bed_height if action == "sleep" else 0.0
 	if action != "" and action != "dead":
 		action_t += delta / maxf(action_len, 0.05)
 		if action_t >= 1.0 and not HOLD.has(action):
 			action = ""
-	var s := sin(phase)
-	var c := cos(phase)
-	var m := move_amt
-	var idle := 1.0 - clampf(m * 2.0, 0.0, 1.0)
-	var breath := sin(_breath)
-	# --- Grundhaltung / Laufen ---
-	var hip_y := absf(c) * 0.055 * m + breath * 0.004 - 0.02 * idle
-	var hips := Vector3(lean * 0.3, s * 0.14 * m, 0)
-	var spine := Vector3(-0.1 * m - lean * 0.5, -s * 0.1 * m, 0)
-	var chest := Vector3(-0.06 * m + breath * 0.015 * idle - lean * 0.4, -s * 0.12 * m + sin(_idle_t * 0.7) * 0.04 * idle, 0)
-	var neck := Vector3(0.05 * m + lean * 0.5, 0, 0)
-	var head := Vector3(0.04 * m + lean * 0.4, s * 0.06 * m + sin(_idle_t * 0.5) * 0.08 * idle, 0)
-	var thigh_l := Vector3(s * 0.8 * m - 0.03 * idle, 0, 0.04 * idle)
-	var thigh_r := Vector3(-s * 0.8 * m - 0.03 * idle, 0, -0.04 * idle)
-	var shin_l := Vector3(-maxf(0.0, -c) * 1.25 * m - 0.06 - 0.05 * idle, 0, 0)
-	var shin_r := Vector3(-maxf(0.0, c) * 1.25 * m - 0.06 - 0.05 * idle, 0, 0)
-	var foot_l := Vector3(maxf(0.0, -c) * 0.4 * m + s * 0.15 * m, 0, 0)
-	var foot_r := Vector3(maxf(0.0, c) * 0.4 * m - s * 0.15 * m, 0, 0)
-	var arm_l := Vector3(-s * 0.7 * m + 0.05, 0, -0.12 - 0.03 * breath * idle)
-	var arm_r := Vector3(s * 0.7 * m + 0.05, 0, 0.12 + 0.03 * breath * idle)
-	var fore_l := Vector3(0.25 + 0.8 * m, 0, 0)
-	var fore_r := Vector3(0.25 + 0.8 * m, 0, 0)
-	var hand_l := Vector3(-1.3, 0, 0) if (blade_l != null and blade_l.visible) else Vector3.ZERO
-	var armed := blade != null and blade.visible
-	# Klinge liegt senkrecht zum Unterarm – Handgelenk abknicken, damit sie nach vorne zeigt
-	var hand_rr := Vector3(-1.3, 0, 0) if armed else Vector3.ZERO
-	if weapon_pose and armed:
-		# Kampfhaltung im Stand: Klinge locker nach vorne-unten
-		arm_r = arm_r.lerp(Vector3(0.3, 0.0, 0.16), idle)
-		fore_r = fore_r.lerp(Vector3(0.6, 0, 0), idle)
-	var t: float = clampf(action_t, 0.0, 1.0)
-	match action:
-		"attack":
-			var k := _swing(t)
-			match combo % 3:
-				0:  # Rückhand-Schnitt von links nach rechts
-					chest.y = lerpf(0.7, -0.75, k)
-					spine.y = lerpf(0.35, -0.35, k)
-					arm_r = Vector3(1.4, lerpf(1.2, -1.0, k), lerpf(0.9, 0.3, k))
-					fore_r = Vector3(lerpf(1.3, 0.15, k), 0, 0)
-				1:  # Vorhand zurück
-					chest.y = lerpf(-0.7, 0.8, k)
-					spine.y = lerpf(-0.3, 0.4, k)
-					arm_r = Vector3(1.45, lerpf(-1.0, 1.1, k), lerpf(0.2, 0.6, k))
-					fore_r = Vector3(lerpf(0.2, 1.1, k), 0, 0)
-				2:  # Abwärtshieb mit Sprung
-					hip_y += sin(t * PI) * 0.22
-					spine.x = lerpf(0.25, -0.35, k)
-					chest.x = lerpf(0.3, -0.35, k)
-					arm_r = Vector3(lerpf(2.9, 0.5, k), 0, 0.12)
-					arm_l = Vector3(lerpf(2.6, 0.4, k), 0, -0.12)
-					fore_r = Vector3(lerpf(0.6, 0.1, k), 0, 0)
-					fore_l = Vector3(lerpf(0.6, 0.6, k), 0, 0)
-			arm_l.x = maxf(arm_l.x, 0.4)
-			fore_l.x = maxf(fore_l.x, 1.1)
-			thigh_l = Vector3(-0.55, 0, 0.05)
-			thigh_r = Vector3(0.35, 0, -0.05)
-			shin_l = Vector3(-0.35, 0, 0)
-			shin_r = Vector3(-0.55, 0, 0)
-			hip_y -= 0.05
-		"windup":
-			var w: float = minf(t, 1.0)
-			spine = Vector3(0.2 * w, 0.35 * w, 0)
-			chest = Vector3(0.15 * w, 0.4 * w, 0)
-			arm_r = Vector3(2.4 * w, -0.4 * w, 0.4)
-			fore_r = Vector3(0.9 * w, 0, 0)
-			thigh_l = Vector3(-0.3 * w, 0, 0)
-			shin_l = Vector3(-0.3 * w, 0, 0)
-			hip_y -= 0.06 * w
-		"dash":
-			spine.x = -0.45
-			chest.x = -0.3
-			arm_l = Vector3(-1.0, 0, -0.35)
-			arm_r = Vector3(-1.0, 0, 0.35)
-			fore_l = Vector3(0.2, 0, 0)
-			fore_r = Vector3(0.2, 0, 0)
-			thigh_l = Vector3(-0.9, 0, 0)
-			shin_l = Vector3(-0.6, 0, 0)
-			thigh_r = Vector3(0.5, 0, 0)
-			shin_r = Vector3(-1.4, 0, 0)
-			hip_y -= 0.12
-		"cast":
-			var cc := sin(t * PI)
-			chest.y = sin(t * TAU) * 0.6
-			arm_l = Vector3(0.8 * cc, 0, -1.4 * cc)
-			arm_r = Vector3(0.8 * cc, 0, 1.4 * cc)
-			fore_l = Vector3(0.4, 0, 0)
-			fore_r = Vector3(0.4, 0, 0)
-			hip_y -= cc * 0.12
-			thigh_l = Vector3(-0.3 * cc, 0, 0.15 * cc)
-			thigh_r = Vector3(-0.3 * cc, 0, -0.15 * cc)
-			shin_l = Vector3(-0.6 * cc, 0, 0)
-			shin_r = Vector3(-0.6 * cc, 0, 0)
-		"hurt":
-			var hh := sin(t * PI)
-			spine.x = 0.25 * hh
-			chest.x = 0.25 * hh
-			head.x = 0.35 * hh
-			arm_l.z = -0.7 * hh
-			arm_r.z = 0.7 * hh
-		"spit":
-			var sp := sin(t * PI)
-			head.x -= 0.6 * sp
-			neck.x -= 0.3 * sp
-			chest.x += 0.25 * sp
-		"talk":
-			var tk := sin(_idle_t * 3.0)
-			arm_r = Vector3(0.6 + 0.2 * tk, -0.3, 0.25)
-			fore_r = Vector3(1.2, 0, 0)
-			head.x += sin(_idle_t * 5.0) * 0.04
-		"kneel", "cower":
-			var k := minf(1.0, action_t * 3.0)
-			hip_y = lerpf(hip_y, -0.44, k)
-			thigh_l = thigh_l.lerp(Vector3(0.2, 0, 0.08), k)
-			thigh_r = thigh_r.lerp(Vector3(0.1, 0, -0.08), k)
-			shin_l = shin_l.lerp(Vector3(-1.6, 0, 0), k)
-			shin_r = shin_r.lerp(Vector3(-1.6, 0, 0), k)
-			foot_l = Vector3(0.5, 0, 0) * k
-			foot_r = Vector3(0.5, 0, 0) * k
-			spine = spine.lerp(Vector3(-0.3, 0, 0), k)
-			head = head.lerp(Vector3(-0.35 + sin(_idle_t * 1.3) * 0.05, 0, 0), k)
-			if action == "cower":
-				arm_l = arm_l.lerp(Vector3(2.3, 0.3, -0.2), k)
-				arm_r = arm_r.lerp(Vector3(2.3, -0.3, 0.2), k)
-				fore_l = Vector3(1.9, 0, 0) * k
-				fore_r = Vector3(1.9, 0, 0) * k
-			else:
-				arm_l = arm_l.lerp(Vector3(0.35, 0, -0.1), k)
-				arm_r = arm_r.lerp(Vector3(0.35, 0, 0.1), k)
-				fore_l = Vector3(0.5, 0, 0) * k
-				fore_r = Vector3(0.5, 0, 0) * k
-		"sit":
-			var k := minf(1.0, action_t * 3.0)
-			hip_y = lerpf(hip_y, -0.66, k)
-			thigh_l = Vector3(1.45, 0, 0.12) * k
-			thigh_r = Vector3(1.45, 0, -0.12) * k
-			shin_l = Vector3(-1.25, 0, 0) * k
-			shin_r = Vector3(-1.25, 0, 0) * k
-			spine = Vector3(0.05, 0, 0)
-			arm_l = Vector3(0.5, 0, -0.15)
-			arm_r = Vector3(0.5, 0, 0.15)
-			fore_l = Vector3(0.9, 0, 0)
-			fore_r = Vector3(0.9, 0, 0)
-		"lie", "sleep":
-			var d := minf(1.0, action_t * 2.0)
-			rotation.x = lerpf(0.0, PI * 0.5, d)
-			position.y = lerpf(0.0, 0.16 + bed_height, d)
-			chest.x += sin(_breath * (1.6 if action == "lie" else 0.8)) * 0.04
-			arm_l = Vector3(0.1, 0, -0.35)
-			arm_r = Vector3(0.6 if action == "lie" else 0.1, 0, 0.3)
-			fore_r = Vector3(1.4 if action == "lie" else 0.2, 0, 0)
-			head = Vector3(0, 0.4 if action == "sleep" else sin(_idle_t * 0.8) * 0.2, 0)
-		"feed":
-			var k := minf(1.0, action_t * 4.0)
-			hip_y = lerpf(hip_y, -0.18, k)
-			spine = spine.lerp(Vector3(-0.45, 0, 0), k)
-			chest = chest.lerp(Vector3(-0.2, 0, 0), k)
-			neck = Vector3(-0.3, 0, 0) * k
-			head = Vector3(-0.35, 0.3, 0.25) * k
-			arm_l = arm_l.lerp(Vector3(1.2, 0.35, -0.3), k)
-			arm_r = arm_r.lerp(Vector3(1.2, -0.35, 0.3), k)
-			fore_l = Vector3(0.9, 0, 0) * k
-			fore_r = Vector3(0.9, 0, 0) * k
-			thigh_l = Vector3(0.45, 0, 0) * k
-			shin_l = Vector3(-0.6, 0, 0) * k
-			thigh_r = Vector3(-0.2, 0, 0) * k
-		"dead":
-			var d: float = minf(1.0, action_t + delta * 2.5)
-			action_t = d
-			rotation.x = lerpf(0.0, PI * 0.5, d)
-			position.y = lerpf(0.0, 0.18, d)
-			arm_l = Vector3(0, 0, -1.2 * d)
-			arm_r = Vector3(0, 0, 1.2 * d)
-	skel.set_bone_pose_position(bi.hips, BodyBuilder.bone_rest(0, 1.0) + Vector3(0, hip_y, 0))
-	_r("hips", hips)
-	_r("spine", spine)
-	_r("chest", chest)
-	_r("neck", neck)
-	_r("head", head)
-	_r("upperarm.L", arm_l)
-	_r("upperarm.R", arm_r)
-	_r("forearm.L", fore_l)
-	_r("forearm.R", fore_r)
-	_r("hand.L", hand_l)
-	_r("hand.R", hand_rr)
-	_r("thigh.L", thigh_l)
-	_r("thigh.R", thigh_r)
-	_r("shin.L", shin_l)
-	_r("shin.R", shin_r)
-	_r("foot.L", foot_l)
-	_r("foot.R", foot_r)
-
-func _swing(t: float) -> float:
-	# schnelle Mitte, ruhige Enden
-	if t < 0.25:
-		return t * 0.4
-	if t < 0.55:
-		return 0.1 + (t - 0.25) / 0.3 * 0.85
-	return 0.95 + (t - 0.55) * 0.11
+	if action != "" and MAP.has(action):
+		var e: Array = MAP[action]
+		var a := anim.get_animation(_cur)
+		var length := a.length if a else 1.0
+		match e[1]:
+			"once":
+				# Ablauf an die Spiellogik anpassen (z. B. Angriffstempo)
+				anim.speed_scale = clampf(length / maxf(action_len * 1.25, 0.05), 0.6, 3.5) if action in ["attack", "dash"] else 1.0
+			"scrub":
+				var k := clampf(action_t * (4.0 if action == "feed" or action == "kneel" else 1.0), 0.0, 1.0)
+				anim.seek(length * float(e[2]) * k, true)
+			_:
+				anim.speed_scale = 1.0
+		return
+	# Aufstehen abwarten
+	if _getup > 0.0:
+		_getup -= delta
+		anim.speed_scale = 1.0
+		return
+	# Fortbewegung
+	var target := idle_anim if not (_drawn and blade != null) else "Sword_Idle"
+	var sc := 1.0
+	if speed > 0.25:
+		if speed < 2.4:
+			target = "Walk"
+			sc = clampf(speed / 1.5, 0.6, 1.5)
+		elif speed < 5.2:
+			target = "Jog_Fwd"
+			sc = clampf(speed / 3.8, 0.7, 1.4)
+		else:
+			target = "Sprint"
+			sc = clampf(speed / 6.5, 0.8, 1.4)
+	if target != _cur or anim.is_playing() == false:
+		_play(target, 0.22)
+	anim.speed_scale = sc

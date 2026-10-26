@@ -153,7 +153,20 @@ func _build_world() -> void:
 		burst(player.global_position + Vector3(0, 1, 0), H.GOLD, 2.0)
 		hud.show_banner("STUFE %d" % l))
 	_last_day = int(PlayerStats.s.day)
+	apply_quality()
+	PlayerStats.settings_changed.connect(apply_quality)
 	print("Welt fertig in ", Time.get_ticks_msec() - t0, " ms")
+
+## Grafikstufe anwenden (Auflösung, Kantenglättung, Schatten, Sichtweiten, Leuchten)
+func apply_quality() -> void:
+	var q := PlayerStats.quality
+	var vp := get_viewport()
+	vp.scaling_3d_scale = [0.65, 0.82, 1.0][q]
+	vp.msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_2X][q]
+	RenderingServer.directional_shadow_atlas_set_size([1024, 2048, 4096][q], true)
+	daynight.sun.directional_shadow_max_distance = [26.0, 42.0, 60.0][q]
+	daynight.env.glow_enabled = q > 0
+	veg.set_quality(q)
 
 func _place_player() -> void:
 	var p: Array = PlayerStats.s.get("pos", [])
@@ -194,7 +207,9 @@ func _spawn_world() -> void:
 	_spawn_npc("oswin", "Oswin", Looks.smith(), sp.npc_smith, "villager", 6)
 	_spawn_npc("pip", "Pip", Looks.child(), sp.npc_child, "child", 5)
 	_spawn_npc("mara", "Mara", Looks.widow(), sp.npc_widow, "villager", 4)
-	_spawn_npc("hallin", "Bauer Hallin", Looks.settler(5), sp.npc_farmer, "villager", 2)
+	var hl := Looks.settler(5)
+	hl.merge({"female": false, "body": "male.outfit.farmer.lod1", "armor": "armor.farmer.default", "hat": "equipment.hat.straw.default", "hair": "hair.receding.hair-1", "beard": "beard.short", "idle": "Farm_Harvest"}, true)
+	_spawn_npc("hallin", "Bauer Hallin", hl, sp.npc_farmer, "villager", 2)
 	_spawn_npc("ilse", "Ilse", Looks.settler(9), sp.village + Vector3(-10, 0, 8), "villager", 0)
 	_spawn_npc("bo", "Bo", Looks.settler(14), sp.village + Vector3(10, 0, -8), "villager", 2)
 	# Jory im Käfig
@@ -316,7 +331,10 @@ func _build_title() -> void:
 	var br := SystemWindow.brightness_row(_refresh_title)
 	br.custom_minimum_size = Vector2(280, 0)
 	v.add_child(br)
-	v.add_child(H.lbl("v0.4.0 · Open-World-Prototyp", 9, Color(H.MUTED, 0.6), H.F_MONO))
+	var qr := SystemWindow.quality_row(_refresh_title)
+	qr.custom_minimum_size = Vector2(280, 0)
+	v.add_child(qr)
+	v.add_child(H.lbl("v0.5.0 · Open-World-Prototyp", 9, Color(H.MUTED, 0.6), H.F_MONO))
 
 func _refresh_title() -> void:
 	if title:
@@ -824,6 +842,7 @@ func _process(delta: float) -> void:
 	daynight.update(delta)
 	PlayerStats.night = daynight.night
 	places.tick(delta, daynight.night)
+	(terrain.water.material_override as ShaderMaterial).set_shader_parameter("sky_tint", Color(0.45, 0.5, 0.6).lerp(Color(0.1, 0.12, 0.22), daynight.night))
 	if state == "title":
 		# Kamerafahrt über die Ruine
 		var a := Time.get_ticks_msec() * 0.00005

@@ -48,7 +48,6 @@ func _ready() -> void:
 	add_to_group("npcs")
 	if role == "guard":
 		(model as Humanoid).add_blade(Color(0.6, 0.62, 0.66), 0.85, 0.05)
-		(model as Humanoid).blade.material_override = Toon.mat(Color(0.55, 0.57, 0.6), {"metal": 0.8, "rough": 0.3})
 	marker = Label3D.new()
 	marker.font = HoloUI.F_BOLD
 	marker.font_size = 96

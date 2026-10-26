@@ -153,12 +153,12 @@ func _convert(src: Material, kind: String, h: float) -> ShaderMaterial:
 			"twisted":
 				m.set_shader_parameter("tint", Color(0.72, 0.42, 0.42))
 			"grass":
-				m.set_shader_parameter("tint", Color(0.52, 0.66, 0.4))
+				m.set_shader_parameter("tint", Color(0.42, 0.5, 0.32))
 			"fern":
 				m.set_shader_parameter("tint", Color(0.66, 0.72, 0.56))
 			_:
 				m.set_shader_parameter("tint", Color(0.85, 0.8, 0.8))
-		m.set_shader_parameter("desat", 0.32)
+		m.set_shader_parameter("desat", 0.45 if kind in ["grass", "flower"] else 0.32)
 	else:
 		var rocky := kind in ["rock", "boulder"]
 		m.set_shader_parameter("tint", Color(0.72, 0.72, 0.76) if rocky else Color(0.78, 0.72, 0.68))
@@ -414,6 +414,20 @@ func _chunk(ci: int, cj: int) -> int:
 				var target: float = {"bush": 1.3, "fern": 0.9, "shroom": 0.3}[under] * rng.randf_range(0.7, 1.3)
 				var us := target / maxf(0.1, float(heights.get(uv, 1.0)))
 				add.call(uv, _xf(rng, terrain.ground(Vector3(bx, 0, bz)) - Vector3(0, 0.05, 0), us), under)
+	# Offenes Land: einzelne Büsche, Farne, Blumen, Pilze, Steine
+	for i in [8, 16, 26][PlayerStats.quality]:
+		var x := x0 + rng.randf() * 64.0
+		var z := z0 + rng.randf() * 64.0
+		var y := terrain.height_at(x, z)
+		if y < 0.6 or Vector2(x, z).length() > 270.0 or terrain.road_at(x, z) > 0.1 or _blocked(x, z, 1.0):
+			continue
+		if terrain.normal_at(x, z).y < 0.8:
+			continue
+		var r := rng.randf()
+		var kind := "bush" if r < 0.35 else ("fern" if r < 0.6 else ("flower" if r < 0.8 else ("shroom" if r < 0.88 else "rock")))
+		var v := _pick(rng, kind)
+		var target: float = {"bush": 1.2, "fern": 0.8, "flower": 0.5, "shroom": 0.3, "rock": 0.6}[kind] * rng.randf_range(0.7, 1.3)
+		add.call(v, _xf(rng, Vector3(x, y - 0.05, z), target / maxf(0.1, float(heights.get(v, 1.0))), 0.2 if kind == "rock" else 0.0), kind)
 	# Felsen
 	for i in 8:
 		var x := x0 + rng.randf() * 64.0
@@ -436,7 +450,7 @@ func _chunk(ci: int, cj: int) -> int:
 			var gx := x0 + si * 16.0
 			var gz := z0 + sj * 16.0
 			var patches := {"patch": [], "patch_b": [], "patch_flower": []}
-			for i in 30:
+			for i in [16, 30, 52][PlayerStats.quality]:
 				var x := gx + rng.randf() * 16.0
 				var z := gz + rng.randf() * 16.0
 				var y := terrain.height_at(x, z)
@@ -491,8 +505,22 @@ func _mmi(mesh: Mesh, arr: Array, r0: float, r1: float, shadows: bool) -> MultiM
 	mmi.multimesh = mm
 	mmi.visibility_range_begin = r0
 	mmi.visibility_range_end = r1
+	mmi.set_meta("r0", r0)
+	mmi.set_meta("r1", r1)
 	mmi.visibility_range_end_margin = 8.0
 	mmi.visibility_range_begin_margin = 8.0
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mmi)
 	return mmi
+
+## Grafikstufe: Sichtweiten skalieren (Gras stärker)
+func set_quality(q: int) -> void:
+	var k: float = [0.65, 1.0, 1.3][q]
+	var kg: float = [0.6, 1.0, 1.45][q]
+	for c in get_children():
+		if c is MultiMeshInstance3D and c.has_meta("r1"):
+			var r1: float = c.get_meta("r1")
+			var r0: float = c.get_meta("r0")
+			var grass := r1 < 40.0
+			c.visibility_range_end = r1 * (kg if grass else k)
+			c.visibility_range_begin = r0 * k

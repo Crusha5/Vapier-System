@@ -27,12 +27,12 @@ var m_lamp: Material
 
 func build(t: Terrain) -> void:
 	terrain = t
-	m_wood = Toon.mat(Color(0.36, 0.27, 0.19), {"grime": 0.6, "rough": 0.95})
-	m_wood_dark = Toon.mat(Color(0.24, 0.18, 0.13), {"grime": 0.7, "rough": 0.95})
-	m_plank = Toon.mat(Color(0.42, 0.33, 0.24), {"grime": 0.5, "rough": 0.9})
-	m_roof = Toon.mat(Color(0.3, 0.22, 0.17), {"grime": 0.8, "rough": 1.0})
-	m_stone = Toon.mat(Color(0.42, 0.41, 0.4), {"grime": 0.8, "rough": 0.95})
-	m_stone_old = Toon.mat(Color(0.2, 0.2, 0.23), {"grime": 0.9, "rough": 0.7, "rim": 0.15, "rim_color": Color(0.8, 0.2, 0.25)})
+	m_wood = Toon.tri("res://assets/village/wood_planks.png", Color(0.62, 0.55, 0.5), 0.55, 0.5)
+	m_wood_dark = Toon.tri("res://assets/village/wood_dark.png", Color(0.6, 0.55, 0.52), 0.55, 0.5)
+	m_plank = Toon.tri("res://assets/village/wood_planks.png", Color(0.75, 0.68, 0.6), 0.6, 0.4)
+	m_roof = Toon.tri("res://assets/village/T_RoundTiles_BaseColor.png", Color(0.55, 0.45, 0.42), 0.5, 0.6)
+	m_stone = Toon.tri("res://assets/village/T_UnevenBrick_BaseColor.png", Color(0.75, 0.74, 0.74), 0.45, 0.5, 0.35)
+	m_stone_old = Toon.tri("res://assets/village/T_Brick_BaseColor.png", Color(0.42, 0.42, 0.5), 0.38, 0.8, 0.5)
 	m_metal = Toon.mat(Color(0.35, 0.36, 0.38), {"metal": 0.6, "rough": 0.45, "grime": 0.6})
 	m_cloth = Toon.mat(Color(0.48, 0.42, 0.32), {"grime": 0.6, "rough": 1.0})
 	m_cloth_red = Toon.mat(Color(0.45, 0.08, 0.08), {"grime": 0.4, "rough": 1.0})
@@ -234,11 +234,11 @@ func _campfire(p: Vector3, big := false) -> void:
 	_light(p + Vector3(0, 1.2, 0), Color(1.0, 0.55, 0.25), 2.2 * s, 9.0 * s)
 
 func _lantern(p: Vector3) -> void:
-	Toon.cyl(self, 0.06, 0.08, 2.6, p + Vector3(0, 1.3, 0), m_wood_dark, 6)
-	Toon.box(self, Vector3(0.8, 0.08, 0.08), p + Vector3(0.3, 2.55, 0), m_wood_dark)
-	var l := Toon.box(self, Vector3(0.2, 0.28, 0.2), p + Vector3(0.62, 2.3, 0), m_lamp)
-	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_light(p + Vector3(0.62, 2.2, 0), Color(1.0, 0.7, 0.4), 1.2, 7.0)
+	Toon.cyl(self, 0.07, 0.09, 2.6, p + Vector3(0, 1.3, 0), m_wood_dark, 6)
+	var l := _prop("lantern", p + Vector3(0, 2.0, 0.08), 0.0, 0.5)
+	var glow := Toon.box(self, Vector3(0.12, 0.16, 0.12), p + Vector3(0.0, 2.35, 0.38), m_lamp)
+	glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_light(p + Vector3(0.0, 2.3, 0.4), Color(1.0, 0.7, 0.4), 1.3, 8.0)
 
 func _crate(p: Vector3, s := 1.0, rot := 0.0) -> void:
 	VillageKit.piece(self, "Prop_Crate", p, rot, 0.8 * s)
@@ -275,9 +275,28 @@ func _fence(a: Vector3, b: Vector3) -> void:
 		VillageKit.piece(self, "Prop_WoodenFence_Single", p, -atan2(dir.z, dir.x))
 
 func _barrel(p: Vector3) -> void:
-	_cyl(0.32, 0.36, 0.95, p + Vector3(0, 0.47, 0), m_wood, 8, Vector3.ZERO, true)
-	Toon.cyl(self, 0.37, 0.37, 0.06, p + Vector3(0, 0.25, 0), m_metal, 8)
-	Toon.cyl(self, 0.37, 0.37, 0.06, p + Vector3(0, 0.7, 0), m_metal, 8)
+	_prop("barrel-tall" if randf() < 0.5 else "keg", p, randf() * TAU, 0.85)
+	var sb := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var sh := CylinderShape3D.new()
+	sh.radius = 0.45
+	sh.height = 1.1
+	cs.shape = sh
+	sb.add_child(cs)
+	sb.position = p + Vector3(0, 0.55, 0)
+	add_child(sb)
+
+## Requisit aus dem Greyhaven-Starter (Quaternius-Modelle, CC0)
+func _prop(name: String, p: Vector3, rot_y := 0.0, s := 1.0) -> Node3D:
+	var ps := load("res://assets/props/%s.lod1.gltf" % name) as PackedScene
+	if ps == null:
+		return null
+	var n := ps.instantiate() as Node3D
+	n.position = p
+	n.rotation.y = rot_y
+	n.scale = Vector3.ONE * s
+	add_child(n)
+	return n
 
 func _tent(p: Vector3, rot: float, mt: Material) -> void:
 	var tent := PrismMesh.new()
@@ -349,6 +368,40 @@ func _ruin() -> void:
 		var a := TAU * i / 4.0 + PI * 0.25
 		var g := Toon.box(self, Vector3(8.0, 0.05, 0.14), base + Vector3(cos(a) * 4.8, 0.27, sin(a) * 4.8), m_glyph, Vector3(0, -a, 0))
 		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Felsbrocken und Ranken: die Natur holt sich die Ruine zurück
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	for i in 9:
+		var a := TAU * i / 9.0 + rng.randf() * 0.4
+		var r := rng.randf_range(13.0, 19.0)
+		var q := gp(c.x + cos(a) * r, c.y + sin(a) * r)
+		_rock(q - Vector3(0, 0.4, 0), rng.randf_range(0.5, 1.1), rng.randf() * TAU, i % 2 == 0)
+	for i in 8:
+		var a := TAU * i / 8.0 + 0.2
+		if i % 3 == 1:
+			continue
+		var p := base + Vector3(cos(a) * 9.0, 0, sin(a) * 9.0)
+		var out := Vector3(cos(a), 0, sin(a))
+		VillageKit.piece(self, ["Prop_Vine1", "Prop_Vine2", "Prop_Vine4"][i % 3], p + out * 0.62 + Vector3(0, rng.randf_range(3.0, 5.5), 0), -a + PI * 0.5)
+
+func _rock(p: Vector3, s: float, rot: float, big: bool) -> void:
+	var ps := load("res://assets/nature/%s.gltf" % ("Rock_Big_1" if big else "Rock_Medium_3")) as PackedScene
+	var n := ps.instantiate() as Node3D
+	n.position = p
+	n.rotation.y = rot
+	n.scale = Vector3.ONE * s
+	add_child(n)
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).material_override = Toon.tri("res://assets/nature/Rocks_Diffuse.png", Color(0.62, 0.62, 0.66), 0.35, 0.5, 0.6)
+	var sb := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var sh := CylinderShape3D.new()
+	sh.radius = (2.2 if big else 1.3) * s
+	sh.height = (4.0 if big else 2.0) * s
+	cs.shape = sh
+	sb.add_child(cs)
+	sb.position = p + Vector3(0, sh.height * 0.5, 0)
+	add_child(sb)
 
 # ---------- Asch-Furt ----------
 
@@ -383,7 +436,7 @@ func _village() -> void:
 	spots.fire = fire_p
 	for k in 4:
 		var a := TAU * k / 4.0 + 0.4
-		_cyl(0.25, 0.25, 1.8, fire_p + Vector3(cos(a) * 2.4, 0.25, sin(a) * 2.4), m_wood, 7, Vector3(PI * 0.5, -a + PI * 0.5, 0), true)
+		_prop("bench", gp(fire_p.x + cos(a) * 2.6, fire_p.z + sin(a) * 2.6), -a + PI * 0.5, 0.75)
 	# Käfig mit dem Gefangenen (nahe dem Westtor)
 	var cg := gp(c.x - 20, c.y - 6)
 	spots.cage = cg
@@ -417,6 +470,8 @@ func _village() -> void:
 	Toon.box(self, Vector3(3.0, 0.12, 2.0), st + Vector3(0, 2.25, 0), m_cloth_red, Vector3(0.12, 0, 0))
 	_box(Vector3(2.6, 0.9, 1.0), st + Vector3(0, 0.45, 0.3), m_plank)
 	spots.market = st + Vector3(0, 0, -1.4)
+	_prop("cart", gp(c.x - 12, c.y + 6), 0.5, 0.6)
+	_prop("crate-low", gp(c.x - 9.5, c.y + 6.5), 0.2, 0.7)
 	for p in [Vector2(-4, 10), Vector2(9, -6), Vector2(-24, 2), Vector2(4, 25)]:
 		_lantern(gp(c.x + p.x, c.y + p.y))
 	for p in [Vector2(16, 10), Vector2(17, 11.2), Vector2(-12, -6), Vector2(8, -22)]:
@@ -462,8 +517,10 @@ func _bandits() -> void:
 		Toon.box(self, Vector3(0.22, 3.4, 0.22), gal + Vector3(sx * 1.2, 1.7, 0), m_wood_dark)
 	Toon.box(self, Vector3(2.8, 0.22, 0.22), gal + Vector3(0, 3.35, 0), m_wood_dark)
 	spots.bandit_chest = gp(c.x + 3, c.y + 6)
-	_box(Vector3(1.1, 0.7, 0.7), spots.bandit_chest + Vector3(0, 0.35, 0), m_wood_dark)
-	Toon.box(self, Vector3(1.14, 0.12, 0.74), spots.bandit_chest + Vector3(0, 0.62, 0), m_metal)
+	_prop("chest", spots.bandit_chest, 0.4, 0.55)
+	_prop("crate-long", gp(c.x + 5, c.y + 7), 1.2, 0.7)
+	_prop("tub", gp(c.x - 3, c.y + 4), 0.0, 0.5)
+	_barrel(gp(c.x + 6.5, c.y + 5.2))
 
 # ---------- Wachturm ----------
 
@@ -471,17 +528,31 @@ func _tower() -> void:
 	var c := Terrain.TOWER
 	var p := gp(c.x, c.y)
 	spots.tower = p
-	_box(Vector3(4.5, 9.0, 4.5), p + Vector3(0, 4.5, 0), m_stone)
-	_box(Vector3(5.6, 0.5, 5.6), p + Vector3(0, 9.2, 0), m_wood_dark)
-	for sx in [-1.0, 1.0]:
-		for sz in [-1.0, 1.0]:
-			Toon.box(self, Vector3(0.5, 1.4, 0.5), p + Vector3(sx * 2.5, 10.1, sz * 2.5), m_stone)
+	# Runder Wachturm aus Bruchstein mit Ziegelhaube
+	var tw := Toon.cyl(self, 2.7, 3.0, 10.0, p + Vector3(0, 4.9, 0), m_stone, 20)
+	tw.name = "Tower"
+	Toon.cyl(self, 3.05, 3.05, 0.4, p + Vector3(0, 9.9, 0), m_wood_dark, 20)
+	var roof := VillageKit.piece(self, "Roof_Tower_RoundTiles", p + Vector3(0, 10.0, 0), 0.0, 1.08)
+	VillageKit.piece(self, "Door_1_Round", p + Vector3(-0.53, 0.0, 2.95), 0.0)
+	for k in 4:
+		var a := TAU * k / 4.0 + 0.4
+		VillageKit.piece(self, "Window_Thin_Round1", p + Vector3(sin(a) * 2.78, 4.0 + (k % 2) * 2.4, cos(a) * 2.78), a)
+	var tsb := StaticBody3D.new()
+	var tcs := CollisionShape3D.new()
+	var tsh := CylinderShape3D.new()
+	tsh.radius = 2.9
+	tsh.height = 10.0
+	tcs.shape = tsh
+	tsb.add_child(tcs)
+	tsb.position = p + Vector3(0, 5.0, 0)
+	add_child(tsb)
 	# Banner der Wacht
-	Toon.cyl(self, 0.06, 0.06, 4.0, p + Vector3(0, 11.5, 0), m_metal, 6)
-	Toon.box(self, Vector3(1.6, 1.1, 0.05), p + Vector3(0.82, 12.8, 0), Toon.mat(Color(0.12, 0.2, 0.42), {"emit": Color(0.1, 0.2, 0.5), "energy": 0.3}))
-	var beacon := Toon.sphere(self, 0.3, p + Vector3(0, 13.6, 0), Toon.mat(Color(0.5, 0.8, 1.0), {"emit": Color(0.4, 0.75, 1.0), "energy": 3.0}), Vector3.ONE, 8)
+	Toon.cyl(self, 0.06, 0.06, 3.0, p + Vector3(0, 18.6, 0), m_metal, 6)
+	Toon.box(self, Vector3(1.6, 1.1, 0.05), p + Vector3(0.82, 19.4, 0), Toon.mat(Color(0.12, 0.2, 0.42), {"emit": Color(0.1, 0.2, 0.5), "energy": 0.3}))
+	var beacon := Toon.sphere(self, 0.3, p + Vector3(0, 20.2, 0), Toon.mat(Color(0.5, 0.8, 1.0), {"emit": Color(0.4, 0.75, 1.0), "energy": 3.0}), Vector3.ONE, 8)
 	beacon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_light(p + Vector3(0, 13.0, 0), Color(0.5, 0.75, 1.0), 2.0, 16.0, false)
+	_light(p + Vector3(0, 8.0, 3.6), Color(0.5, 0.75, 1.0), 2.0, 14.0, false)
+	_lantern(gp(c.x + 3.2, c.y + 3.6))
 	for k in 2:
 		_tent(gp(c.x - 8 + k * 5.0, c.y + 8), 0.3 * k, Toon.mat(Color(0.2, 0.26, 0.36), {"grime": 0.4}))
 	_campfire(gp(c.x - 3, c.y + 5))

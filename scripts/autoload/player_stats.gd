@@ -79,17 +79,29 @@ var night := 0.0       # von der Welt gesetzt
 var brightness := 1.0  # Geräte-Einstellung, unabhängig vom Spielstand
 signal settings_changed
 
+var quality := 2      # 0 Niedrig, 1 Mittel, 2 Hoch
+const QUALITY_NAMES := ["NIEDRIG", "MITTEL", "HOCH"]
+
 func load_settings() -> void:
 	var cf := ConfigFile.new()
 	if cf.load("user://settings.cfg") == OK:
 		brightness = clampf(float(cf.get_value("video", "brightness", 1.0)), 0.6, 2.2)
+		quality = clampi(int(cf.get_value("video", "quality", 2)), 0, 2)
+
+func _save_settings() -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("video", "brightness", brightness)
+	cf.set_value("video", "quality", quality)
+	cf.save("user://settings.cfg")
+	settings_changed.emit()
 
 func set_brightness(v: float) -> void:
 	brightness = clampf(v, 0.6, 2.2)
-	var cf := ConfigFile.new()
-	cf.set_value("video", "brightness", brightness)
-	cf.save("user://settings.cfg")
-	settings_changed.emit()
+	_save_settings()
+
+func set_quality(q: int) -> void:
+	quality = clampi(q, 0, 2)
+	_save_settings()
 
 func _ready() -> void:
 	load_settings()

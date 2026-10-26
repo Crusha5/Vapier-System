@@ -46,9 +46,12 @@ func setup(t: String, w: Node, at: Vector3, lvl := 1, id := "") -> Enemy:
 
 func _build_model() -> void:
 	match type:
-		"bandit", "bandit_archer":
-			var h := Humanoid.new(Looks.bandit(npc_id.hash() if npc_id != "" else randi()))
-			model = h
+		"bandit":
+			model = Humanoid.new(Looks.bandit(npc_id.hash() if npc_id != "" else randi()))
+		"bandit_archer":
+			var l := Looks.bandit_archer(npc_id.hash() if npc_id != "" else randi())
+			l.weapon = "equipment.crossbow.default"
+			model = Humanoid.new(l)
 		"krahe":
 			model = Humanoid.new(Looks.krahe())
 		"wacht":
@@ -65,13 +68,13 @@ func _ready() -> void:
 	add_to_group("hostile")
 	if model is Humanoid:
 		var h := model as Humanoid
+		h.always_drawn = true
 		if type == "bandit_archer":
 			h.add_blade(Color(0.4, 0.3, 0.2), 0.5, 0.04)
 		elif type == "wacht":
 			h.add_blade(Color(0.5, 0.75, 1.0), 1.0, 0.05)
 		else:
 			h.add_blade(Color(0.55, 0.55, 0.58), 0.85 if type != "krahe" else 1.1, 0.05)
-			h.blade.material_override = Toon.mat(Color(0.5, 0.5, 0.53), {"metal": 0.8, "rough": 0.35})
 	telegraph = Toon.quad_holo(self, Vector2(1, 1), Vector3(0, 0.08, 0), Toon.holo(Color(1.0, 0.15, 0.1), 2.0, true, 0.0).duplicate())
 	telegraph.visible = false
 

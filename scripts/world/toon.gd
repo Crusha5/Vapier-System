@@ -58,6 +58,23 @@ static func mat(color: Color, opts := {}) -> ShaderMaterial:
 	_cache[key] = m
 	return m
 
+const TRI := preload("res://shaders/tri.gdshader")
+
+## Texturiertes Material mit Dreifach-Projektion (Stein, Holz, Ziegel)
+static func tri(texture: String, tint := Color(1, 1, 1), scale := 0.5, grime := 0.4, moss := 0.0) -> ShaderMaterial:
+	var key := "tri|%s|%s|%s|%s|%s" % [texture, tint, scale, grime, moss]
+	if _cache.has(key):
+		return _cache[key]
+	var m := ShaderMaterial.new()
+	m.shader = TRI
+	m.set_shader_parameter("tex", load(texture))
+	m.set_shader_parameter("tint", tint)
+	m.set_shader_parameter("scale", scale)
+	m.set_shader_parameter("grime", grime)
+	m.set_shader_parameter("moss", moss)
+	_cache[key] = m
+	return m
+
 ## Material für Figuren (Treffer-Blitz läuft über set_overlay)
 static func amat(color: Color, opts := {}) -> ShaderMaterial:
 	return mat(color, opts)
@@ -178,6 +195,6 @@ static func set_overlay(model: Node, color: Color, amount: float) -> void:
 
 static func _apply_overlay(n: Node, m: Material) -> void:
 	if n is GeometryInstance3D and not (n is Label3D):
-		(n as GeometryInstance3D).material_overlay = m
+		(n as GeometryInstance3D).material_overlay = m if m != null else (n.get_meta("base_overlay") if n.has_meta("base_overlay") else null)
 	for c in n.get_children():
 		_apply_overlay(c, m)

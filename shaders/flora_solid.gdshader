@@ -21,7 +21,7 @@ void fragment() {
 	float l = dot(c, vec3(0.3, 0.59, 0.11));
 	c = mix(c, vec3(l), desat);
 	// Moos auf Oberseiten
-	c = mix(c, vec3(0.16, 0.22, 0.1) * (0.7 + l), clamp(wnorm.y * 1.4 - 0.5, 0.0, 1.0) * moss);
+	c = mix(c, vec3(0.3, 0.38, 0.18) * (0.75 + l), clamp(wnorm.y * 1.4 - 0.5, 0.0, 1.0) * moss);
 	ALBEDO = c;
 	ROUGHNESS = 0.92;
 	SPECULAR = 0.15;

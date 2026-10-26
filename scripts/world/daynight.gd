@@ -20,7 +20,7 @@ var follow: Node3D
 var veil_mat: ShaderMaterial
 
 # Farbpaletten: [Himmel oben, Horizont, Umgebung, Nebel, Sonnenlicht]
-const DAY := [Color(0.24, 0.36, 0.56), Color(0.6, 0.63, 0.66), Color(0.5, 0.53, 0.58), Color(0.5, 0.54, 0.58), Color(1.0, 0.93, 0.82)]
+const DAY := [Color(0.22, 0.32, 0.48), Color(0.52, 0.55, 0.6), Color(0.5, 0.53, 0.58), Color(0.42, 0.46, 0.52), Color(1.0, 0.93, 0.82)]
 const DUSK := [Color(0.18, 0.16, 0.28), Color(0.7, 0.38, 0.28), Color(0.56, 0.44, 0.46), Color(0.42, 0.3, 0.28), Color(1.0, 0.58, 0.36)]
 const NIGHT := [Color(0.05, 0.07, 0.15), Color(0.16, 0.17, 0.27), Color(0.46, 0.52, 0.72), Color(0.12, 0.14, 0.21), Color(0.62, 0.72, 1.0)]
 
@@ -50,8 +50,21 @@ func _ready() -> void:
 	env.fog_depth_curve = 1.4
 	env.fog_sky_affect = 0.1
 	env.adjustment_enabled = true
-	env.adjustment_contrast = 1.08
-	env.adjustment_saturation = 0.88
+	env.adjustment_contrast = 1.1
+	env.adjustment_saturation = 0.92
+	# Farbstimmung: kühle Schatten, warme Lichter
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.02, 0.03, 0.06))
+	grad.set_color(1, Color(1.0, 0.97, 0.9))
+	grad.add_point(0.35, Color(0.3, 0.33, 0.38))
+	grad.add_point(0.7, Color(0.72, 0.7, 0.66))
+	var gt := GradientTexture1D.new()
+	gt.gradient = grad
+	gt.width = 256
+	env.adjustment_color_correction = gt
+	env.fog_sun_scatter = 0.25
+	env.fog_height = 6.0
+	env.fog_height_density = 0.0
 	we.environment = env
 	add_child(we)
 	sun = DirectionalLight3D.new()
@@ -140,8 +153,12 @@ func update(delta: float) -> void:
 	sky_mat.set_shader_parameter("horizon_color", pal[1])
 	sky_mat.set_shader_parameter("night", night)
 	env.ambient_light_color = pal[2]
-	env.ambient_light_energy = lerpf(0.9, 1.35, night)
+	env.ambient_light_energy = lerpf(0.75, 1.35, night)
 	env.fog_light_color = pal[3]
+	# Bodennebel in Senken: nachts und morgens dichter
+	var dawn := clampf(1.0 - absf(minutes - 6.5 * 60.0) / 120.0, 0.0, 1.0)
+	env.fog_height_density = 0.02 + 0.05 * maxf(night * 0.6, dawn)
+	sky_mat.set_shader_parameter("cloud_cover", 0.55 + rain * 0.35)
 	env.fog_depth_end = lerpf(320.0, 170.0, maxf(night * 0.7, rain))
 	env.fog_depth_begin = lerpf(45.0, 25.0, maxf(rain, night * 0.4))
 	env.tonemap_exposure = 1.15 * PlayerStats.brightness
@@ -157,7 +174,7 @@ func update(delta: float) -> void:
 	sky_mat.set_shader_parameter("sun_color", pal[4])
 	sun.look_at_from_position(Vector3.ZERO, -dir, Vector3.UP if absf(dir.y) < 0.99 else Vector3.FORWARD)
 	sun.light_color = pal[4]
-	sun.light_energy = lerpf(maxf(0.25, sh) * 1.2, 0.95, night) * (1.0 - rain * 0.35)
+	sun.light_energy = lerpf(maxf(0.3, sh) * 1.45, 0.95, night) * (1.0 - rain * 0.35)
 	sun.shadow_opacity = lerpf(0.8, 0.55, night)
 	veil_mat.set_shader_parameter("strength", lerpf(0.3, 0.7, night))
 	# Wetter

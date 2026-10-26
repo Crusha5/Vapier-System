@@ -98,22 +98,25 @@ func _build_viewblade(col: Color, length: float) -> void:
 		viewblade.queue_free()
 	viewblade = Node3D.new()
 	rig.camera.add_child(viewblade)
+	# Unterarm im Ärmel
 	var arm := MeshInstance3D.new()
 	var am := CapsuleMesh.new()
 	am.radius = 0.05
 	am.height = 0.45
 	arm.mesh = am
-	arm.material_override = Toon.mat(Color(0.1, 0.1, 0.12), {"rough": 0.9})
+	arm.material_override = Toon.mat(Color(0.08, 0.08, 0.1), {"rough": 0.9})
 	arm.rotation = Vector3(PI * 0.5, 0, 0)
 	arm.position = Vector3(0, 0, 0.18)
 	viewblade.add_child(arm)
+	# Schwert aus dem Baukasten mit Blutschimmer
 	var b := MeshInstance3D.new()
-	var bm := PrismMesh.new()
-	bm.size = Vector3(0.07, length * 0.8, 0.02)
-	b.mesh = bm
-	b.material_override = Toon.mat(col, {"emit": col, "energy": 2.2})
-	b.rotation = Vector3(-PI * 0.5 + 0.15, 0, 0)
-	b.position = Vector3(0, 0.02, -length * 0.35)
+	var mi_src := model.blade
+	if mi_src:
+		b.mesh = mi_src.mesh
+		b.material_overlay = mi_src.material_overlay
+		b.scale = mi_src.scale
+	b.rotation = Vector3(-PI * 0.5 + 0.25, 0, 0)
+	b.position = Vector3(0, 0.0, 0.0)
 	b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	viewblade.add_child(b)
 	viewblade.position = Vector3(0.28, -0.24, -0.42)
