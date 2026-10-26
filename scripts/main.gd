@@ -113,6 +113,10 @@ func _ready() -> void:
 	if autotest:
 		state = "play"
 		hud.title_mode = false
+	elif Engine.has_meta("sp_autostart"):
+		# Nach „Neues Spiel“ mit gelöschtem Stand direkt ins Intro
+		Engine.remove_meta("sp_autostart")
+		_start(true)
 	else:
 		_build_title()
 
@@ -302,7 +306,8 @@ func _build_title() -> void:
 		var b1 := H.btn("Fortsetzen  ·  Tag %d · %s" % [int(PlayerStats.s.day), PlayerStats.tier_name()], func(): _start(false), "BtnRed")
 		b1.custom_minimum_size = Vector2(280, 44)
 		v.add_child(b1)
-	var b2 := H.btn("Neues Spiel", func(): _confirm_new(), "" if PlayerStats.s.started else "BtnRed")
+	var b2 := H.btn("Neues Spiel", Callable(), "" if PlayerStats.s.started else "BtnRed")
+	b2.pressed.connect(_confirm_new.bind(b2))
 	b2.custom_minimum_size = Vector2(280, 42)
 	v.add_child(b2)
 	var note := H.wrap("Ein einziger Spielstand. Jede Entscheidung wird sofort gespeichert – es gibt kein Zurück.", 10, Color(H.MUTED, 0.8))
@@ -310,13 +315,18 @@ func _build_title() -> void:
 	v.add_child(note)
 	v.add_child(H.lbl("v0.3.0 · Open-World-Prototyp", 9, Color(H.MUTED, 0.6), H.F_MONO))
 
-func _confirm_new() -> void:
-	if PlayerStats.s.started and not _new_armed:
+func _confirm_new(b: Button) -> void:
+	if not PlayerStats.s.started:
+		# Kein Spielstand: Welt ist frisch, sofort beginnen
+		_start(true)
+		return
+	if not _new_armed:
 		_new_armed = true
-		PlayerStats.system_message.emit("Alles, was du getan hast, geht verloren. Zum Bestätigen erneut tippen.", "warn")
+		b.text = "Wirklich? Alles geht verloren – nochmal tippen"
 		return
 	PlayerStats.delete_save()
 	PlayerStats.reset_game()
+	Engine.set_meta("sp_autostart", true)
 	get_tree().reload_current_scene()
 
 func _start(fresh: bool) -> void:
