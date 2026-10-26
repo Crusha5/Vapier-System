@@ -8,6 +8,9 @@ const TYPES := {
 	"bandit_archer": {"name": "Banditenschütze", "hp": 50.0, "speed": 4.0, "dmg": 9.0, "range": 14.0, "windup": 0.9, "cd": 2.2, "xp": 32, "aggro": 22.0, "kind": "human", "faction": "bandit", "ranged": true, "shards": 3},
 	"krahe": {"name": "Krähe", "hp": 260.0, "speed": 5.0, "dmg": 17.0, "range": 2.3, "windup": 0.45, "cd": 0.9, "xp": 180, "aggro": 18.0, "kind": "human", "faction": "bandit", "boss": true, "shards": 40},
 	"wacht": {"name": "Soldat der Wacht", "hp": 120.0, "speed": 4.6, "dmg": 15.0, "range": 2.2, "windup": 0.5, "cd": 1.0, "xp": 60, "aggro": 20.0, "kind": "human", "faction": "wacht", "shards": 8},
+	"cultist": {"name": "Kind der Nacht", "hp": 80.0, "speed": 4.6, "dmg": 13.0, "range": 2.1, "windup": 0.5, "cd": 1.0, "xp": 45, "aggro": 16.0, "kind": "human", "faction": "cult", "shards": 6},
+	"ilva": {"name": "Seherin Ilva", "hp": 320.0, "speed": 5.0, "dmg": 18.0, "range": 2.3, "windup": 0.45, "cd": 0.9, "xp": 260, "aggro": 18.0, "kind": "human", "faction": "cult", "boss": true, "shards": 60},
+	"sorn": {"name": "Hauptmann Sorn", "hp": 420.0, "speed": 4.8, "dmg": 22.0, "range": 2.4, "windup": 0.5, "cd": 0.95, "xp": 320, "aggro": 24.0, "kind": "human", "faction": "wacht", "boss": true, "shards": 80},
 	"reisser": {"name": "Reißer", "hp": 85.0, "speed": 6.2, "dmg": 13.0, "range": 2.0, "windup": 0.42, "cd": 1.0, "xp": 35, "aggro": 20.0, "kind": "beast", "faction": "wild", "shards": 4},
 }
 
@@ -22,6 +25,7 @@ var wander_target := Vector3.ZERO
 var patrol: Array = []
 var night_only := false
 var spared := false
+var peaceful := false      # greift erst an, wenn es angegriffen wird
 var _windup_len := 0.5
 var _los_t := 0.0
 var _has_los := false
@@ -56,6 +60,12 @@ func _build_model() -> void:
 			model = Humanoid.new(Looks.krahe())
 		"wacht":
 			model = Humanoid.new(Looks.wacht(randi()))
+		"cultist":
+			model = Humanoid.new(Looks.cultist(npc_id.hash() if npc_id != "" else randi()))
+		"ilva":
+			model = Humanoid.new(Looks.ilva())
+		"sorn":
+			model = Humanoid.new(Looks.varek())
 		"reisser":
 			model = QuadModel.new("reisser")
 
@@ -100,6 +110,10 @@ func time_to_hit(p: Vector3) -> float:
 
 func _on_hit(from: Vector3) -> void:
 	aggro = true
+	if peaceful:
+		peaceful = false
+		if world.has_method("on_peaceful_attacked"):
+			world.on_peaceful_attacked(self)
 	if state != "windup" or not is_boss():
 		if state == "windup":
 			telegraph.visible = false
@@ -155,7 +169,7 @@ func _think(delta: float, dist: float) -> void:
 	if _los_t <= 0.0:
 		_los_t = 0.4
 		_has_los = dist < float(cfg.aggro) and can_see(p, float(cfg.aggro), -0.6)
-	if not aggro and (_has_los or dist < 4.0) and not world.player.dead:
+	if not aggro and (_has_los or dist < 4.0) and not world.player.dead and not peaceful:
 		aggro = true
 		world.on_enemy_alerted(self)
 	if aggro and (dist > float(cfg.aggro) * 2.5 or world.player.dead):

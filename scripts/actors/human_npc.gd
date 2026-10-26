@@ -20,6 +20,7 @@ var _attack_t := 0.0
 var _windup := false
 var sees_player_t := 0.0
 var hostile := false
+var follow_target: Node3D   # folgt (z. B. Pip auf dem Heimweg)
 
 func setup(id: String, name: String, lk: Dictionary, w: Node, at: Vector3, r := "villager") -> HumanNpc:
 	npc_id = id
@@ -159,6 +160,17 @@ func _think(delta: float, dist: float) -> void:
 			if state_t > 16.0:
 				revive_from_downed()
 			return
+	if follow_target and is_instance_valid(follow_target):
+		var to := follow_target.global_position - global_position
+		to.y = 0
+		if asleep:
+			wake_up()
+		if to.length() > 2.6:
+			move = steer(follow_target.global_position, clampf(to.length() * 1.2, 2.0, 5.5), delta)
+		if move.length() > 0.05:
+			face_dir(move, delta)
+		apply_motion(move, delta)
+		return
 	if hostile and role == "guard":
 		_guard_fight(delta, p, dist)
 		return

@@ -4,6 +4,15 @@ Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisi
 
 **Veyra** – eine Kolonie, seit zwölf Jahren vom **Schleier** (einem roten Sturm) von der Erde abgeschnitten. Soldat **Kael** hat sich geweigert, das Dorf Morrow niederzubrennen. Kommandant Varek hat ihn erschossen und in den Ruinen der Alten liegen lassen. Dort erweckt ihn **die Erste Nacht** – als Blutgeborenen, mit einem Protokoll im Kopf.
 
+## v0.6 – Aufgaben und Akt 2
+
+- **Akt 2 „Die Kinder der Nacht“:** Schrein des Kults → drei Blutsteine → nächtliche Versammlung mit Seherin Ilva (beitreten, eigener Weg oder angreifen) → Vareks Befehl im Wachturm → **Die Nacht der Feuer**: Asch-Furt warnen oder nicht, das Dorf verteidigen oder brennen lassen. Unumkehrbar, mit Folgen in der Chronik.
+- **Sechs Nebenaufgaben:** Wölfe im Dunkeln (Hallin), Wild für die Furt (Greta), Schleierstahl (Oswin), Pip ist verschwunden (Mara), Ein Ring für Mara, Die Weggabelung (Lenz). Mit Entscheidungen, Belohnungen und Kompass-Markierungen.
+- **Tagebuch** im Systemmenü (Reiter AUFGABEN).
+- **Tiere:** Hirschkühe und Hirsche als Grauläufer, Wölfe als Reißer (Quaternius Ultimate Animated Animals, CC0).
+- **Blutdurst** deutlich langsamer.
+- **Fehler behoben:** Schlafende stehen beim Trinken nicht mehr auf, Felsen sind fest, Schwert schleift nicht mehr, echte Flammen statt Kegel, Zelte aus Stoff.
+
 ## v0.5 – Echte Figuren, Atmosphäre, Grafikstufen
 
 - **Figuren** aus Quaternius' Universal Base Characters + Modular Character Outfits (CC0): Kael im dunklen Kapuzenmantel, Dorfbewohner als Bauern, Wirtin, Schmied, Banditen mit roten Tüchern, Wacht in Rüstung mit Helm, Krähe im Knochenkragen. Haare, Bärte, Strohhut, Schwerter, Armbrust.
@@ -39,6 +48,7 @@ Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisi
 - Quaternius – Medieval Village MegaKit (CC0 1.0), `assets/village/`
 - Quaternius – Universal Base Characters, Modular Character Outfits – Fantasy, Universal Animation Library 1+2 (CC0 1.0), `assets/chars/` – aufbereitet über [moritzbrantner/asset-tooling](https://github.com/moritzbrantner/asset-tooling)
 - Quaternius – Fantasy-Requisiten (Greyhaven-Starter, CC0 1.0), `assets/props/`
+- Quaternius – Ultimate Animated Animals: Hirsch, Hirschkuh, Wolf (CC0 1.0), `assets/animals/`
 
 ## Build
 

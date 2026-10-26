@@ -58,14 +58,19 @@ const DAILY_POOL := {
 	"spare": {"text": "Verschone %d Leben (nur nippen)", "goal": 2},
 }
 
-## Akt 1 – Die Erste Nacht
+## Akt 1 – Die Erste Nacht · Akt 2 – Die Kinder der Nacht
 const STORY := [
 	{"title": "Erwachen", "text": "Etwas ruft dich aus der Dunkelheit. Steh auf."},
 	{"title": "Der Hunger", "text": "Verlass die Ruine. Du brauchst Blut."},
 	{"title": "Asch-Furt", "text": "Folge dem Weg nach Südosten zum Dorf an der Furt."},
 	{"title": "Der Gefangene", "text": "Jory soll bei Sonnenaufgang der Wacht ausgeliefert werden. Entscheide, was mit ihm geschieht."},
 	{"title": "Was du bist", "text": "Kehre zur Ruine zurück. Die Erste Nacht will sprechen."},
-	{"title": "Ende von Akt 1", "text": "Die Wacht weiß, dass du lebst. Akt 2 folgt. Bis dahin: Veyra gehört dir."},
+	{"title": "Akt 2 · Der Schrein", "text": "Krähe sprach von einem Kult. Sein Schrein liegt im Westen, versteckt im Wald."},
+	{"title": "Blutsteine", "text": "Berühre drei Obelisken der Alten, damit die Kinder der Nacht dich erkennen.", "goal": 3},
+	{"title": "Die Versammlung", "text": "Geh nachts zwischen 22 und 3 Uhr zum Schrein. Die Kinder der Nacht erwarten dich."},
+	{"title": "Vareks Befehl", "text": "Im Wachturm im Osten liegen Vareks Befehle. Finde heraus, was die Wacht plant."},
+	{"title": "Die Nacht der Feuer", "text": "Die Wacht will Asch-Furt niederbrennen. Entscheide, auf welcher Seite du stehst."},
+	{"title": "Ende von Akt 2", "text": "Die Nacht der Feuer ist vorbei. Varek wird selbst kommen. Akt 3 folgt."},
 ]
 
 var s: Dictionary = {}
@@ -115,7 +120,7 @@ func reset_game() -> void:
 		"started": false,
 		"level": 1, "xp": 0, "attr_points": 0, "skill_points": 0,
 		"str": 3, "agi": 3, "end": 3, "shd": 2,
-		"hp": 100.0, "blood": 25.0,
+		"hp": 100.0, "blood": 50.0,
 		"humanity": 70.0,
 		"protocol": 0,           # + gehorcht, − widersprochen
 		"inventory": {"animal": 0, "beast": 0, "human": 0},
@@ -127,6 +132,7 @@ func reset_game() -> void:
 		"fed": {},
 		"discovered": [],
 		"choices": [],           # Chronik der Entscheidungen
+		"quests": {},            # Nebenaufgaben: id -> {stage, count, done, failed}
 		"daily": {},
 		"penalty_until": 0,
 		"minutes": 19.0 * 60.0 + 20.0,
@@ -196,7 +202,7 @@ func starving() -> bool:
 
 ## Hunger: je mehr Bestie, desto schneller leer
 func blood_drain() -> float:
-	return 0.18 * (0.7 + beastliness() * 0.9) / (1.0 + stat("end") * 0.05) * maxf(0.4, 1.0 - gear("thrift"))
+	return 0.065 * (0.7 + beastliness() * 0.8) / (1.0 + stat("end") * 0.05) * maxf(0.4, 1.0 - gear("thrift"))
 
 ## Nachtbonus wächst mit der Bestie in dir
 func night_power() -> float:
@@ -456,13 +462,13 @@ func feed(victim: Dictionary, mode: String) -> float:
 	var gained := 0.0
 	match kind:
 		"animal":
-			gained = 18.0 if mode == "drain" else 9.0
+			gained = 30.0 if mode == "drain" else 15.0
 			daily_progress("feed_animal")
 		"beast":
-			gained = 26.0 if mode == "drain" else 12.0
+			gained = 38.0 if mode == "drain" else 18.0
 			buffs["beast"] = 30.0
 		"human":
-			gained = 70.0 if mode == "drain" else 28.0
+			gained = 85.0 if mode == "drain" else 38.0
 			if has_skill("mending") and mode == "sip":
 				gained *= 0.8
 			if mode == "drain":

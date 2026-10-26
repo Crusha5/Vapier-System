@@ -428,6 +428,8 @@ func _chunk(ci: int, cj: int) -> int:
 		var v := _pick(rng, kind)
 		var target: float = {"bush": 1.2, "fern": 0.8, "flower": 0.5, "shroom": 0.3, "rock": 0.6}[kind] * rng.randf_range(0.7, 1.3)
 		add.call(v, _xf(rng, Vector3(x, y - 0.05, z), target / maxf(0.1, float(heights.get(v, 1.0))), 0.2 if kind == "rock" else 0.0), kind)
+		if kind == "rock" and target > 0.45:
+			cols.append([Vector3(x, y, z), target * 0.9, target * 1.4])
 	# Felsen
 	for i in 8:
 		var x := x0 + rng.randf() * 64.0
@@ -443,6 +445,8 @@ func _chunk(ci: int, cj: int) -> int:
 		add.call(_pick(rng, kind), _xf(rng, Vector3(x, y - 0.3 * s, z), s, 0.25), kind)
 		if big:
 			cols.append([Vector3(x, y, z), 1.9 * s, 3.5 * s])
+		elif s > 0.45:
+			cols.append([Vector3(x, y, z), 1.25 * s, 2.0 * s])
 	_emit(near, far, Vector3(x0 + 32.0, 0, z0 + 32.0))
 	# Gras, Blumen in 16-m-Feldern (Büschel-Gruppen)
 	for sj in 4:

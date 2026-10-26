@@ -27,7 +27,7 @@ func _ready() -> void:
 	print("TEST story=", ps.s.story, " investigate=", ps.flag("jory_investigate"))
 	# Laden
 	m._talk(m.npcs.oswin)
-	await _resolve([0])
+	await _resolve([1])
 	await _frames(10)
 	await _shot("s1_shop")
 	m.toggle_menu()

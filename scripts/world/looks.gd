@@ -107,3 +107,7 @@ static func cultist(seed: int) -> Dictionary:
 	var r := _rng(seed + 3000)
 	return {"body": "male.outfit.class.necromancer%s.lod1" % (".skin.light" if r.randf() < 0.6 else ""), "armor": "armor.class.necromancer.default",
 		"cloth": Color(0.55, 0.12, 0.14), "accent": Color(0.6, 0.05, 0.08)}
+
+static func ilva() -> Dictionary:
+	return {"female": true, "body": "female.outfit.tanner.skin.light.lod1", "armor": "armor.tanner.default", "hair": "female.hair.long.hair-2",
+		"hair_color": Color(0.85, 0.84, 0.82), "cloth": Color(0.55, 0.1, 0.12), "skin_tone": Color(0.92, 0.88, 0.9), "scale": 1.02}

@@ -250,7 +250,7 @@ func _make_weapon(left: bool, color: Color, length: float) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = _weapon_mesh(mesh_name)
 	var base_len := 0.45 if dagger else 0.9
-	var k := clampf(length / base_len, 0.6, 1.6)
+	var k := clampf(length / base_len, 0.75, 1.15)
 	mi.scale = Vector3(1.0, k, 1.0)
 	# Blutklinge: rotes Leuchten über dem Stahl
 	if color.r > color.g * 2.5 and color.r > 0.6:
@@ -341,6 +341,11 @@ func _set_drawn(v: bool) -> void:
 	_blade_holder.get_parent().remove_child(_blade_holder)
 	_bone_attach(s[0]).add_child(_blade_holder)
 	_blade_holder.transform = Transform3D(Basis(s[2] as Quaternion), s[1])
+	# weggesteckt etwas kürzer, damit die Klinge nicht über den Boden schleift
+	if v:
+		_blade_holder.scale = Vector3.ONE
+	else:
+		_blade_holder.scale = Vector3.ONE * 0.78
 	if blade_l:
 		blade_l.visible = v
 	# Blutschimmer nur mit gezogener Klinge

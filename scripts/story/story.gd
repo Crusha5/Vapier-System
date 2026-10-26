@@ -273,7 +273,7 @@ func innkeeper(npc: HumanNpc) -> void:
 	if PlayerStats.flag("village_hostile"):
 		say([{"who": "Greta", "text": "Raus aus meiner Schänke!"}], [], Callable(), npc)
 		return
-	var trusted: bool = PlayerStats.flag("jory", "") == "proven" or PlayerStats.flag("tamas", "") == "helped"
+	var trusted: bool = PlayerStats.flag("jory", "") == "proven" or PlayerStats.flag("tamas", "") == "helped" or PlayerStats.flag("greta_room")
 	var lines := [{"who": "Greta", "text": "Willkommen in der „Furt“. Viel gibt's nicht seit dem Schleier, aber das Dach hält."}]
 	var choices := ["Ich brauche ein Zimmer – bis zur Nacht.", "Ich brauche ein Zimmer – bis zum Morgen.", "Erzähl mir von der Gegend."]
 	if not trusted:
@@ -375,4 +375,4 @@ func _finale_choice(i: int) -> void:
 		PlayerStats.set_story(5)
 		w.show_chronicle()
 	say([{"who": N, "text": ["Wir werden sehen, Soldat.", "Wir werden sehen, wer wen frisst.", "Versuch es. Ich bin geduldig."][mini(i, 2)]},
-		{"who": S, "text": "AKT 1 ABGESCHLOSSEN.  Veyra bleibt offen – jage, entdecke, entscheide. Akt 2 folgt."}], [], end)
+		{"who": S, "text": "AKT 1 ABGESCHLOSSEN.  Akt 2 beginnt: Die Kinder der Nacht. Krähe sprach von einem Schrein im Westen."}], [], end)

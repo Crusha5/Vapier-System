@@ -212,8 +212,7 @@ func _campfire(p: Vector3, big := false) -> void:
 		Toon.sphere(self, 0.18 * s, p + Vector3(cos(a) * 0.6 * s, 0.05, sin(a) * 0.6 * s), m_stone, Vector3(1, 0.7, 1), 6)
 	for i in 4:
 		Toon.cyl(self, 0.06 * s, 0.06 * s, 0.9 * s, p + Vector3(0, 0.15, 0), m_wood_dark, 5, Vector3(PI * 0.5, i * PI * 0.25, 0))
-	var f := Toon.cyl(self, 0.0, 0.32 * s, 0.7 * s, p + Vector3(0, 0.45 * s, 0), m_fire, 7)
-	f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_flames(p + Vector3(0, 0.15, 0), s)
 	var embers := CPUParticles3D.new()
 	var em := SphereMesh.new()
 	em.radius = 0.03
@@ -232,6 +231,92 @@ func _campfire(p: Vector3, big := false) -> void:
 	embers.position = p + Vector3(0, 0.5, 0)
 	add_child(embers)
 	_light(p + Vector3(0, 1.2, 0), Color(1.0, 0.55, 0.25), 2.2 * s, 9.0 * s)
+
+static var _flame_mat: StandardMaterial3D
+
+## Flammen aus weichen, additiven Partikeln
+func _flames(p: Vector3, s: float) -> void:
+	if _flame_mat == null:
+		var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+		for y in 64:
+			for x in 64:
+				var d := Vector2((x - 31.5) / 32.0, (y - 31.5) / 32.0)
+				var a := clampf(1.0 - d.length(), 0.0, 1.0)
+				img.set_pixel(x, y, Color(1, 1, 1, a * a))
+		_flame_mat = StandardMaterial3D.new()
+		_flame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_flame_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_flame_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		_flame_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		_flame_mat.vertex_color_use_as_albedo = true
+		_flame_mat.albedo_texture = ImageTexture.create_from_image(img)
+	var fl := CPUParticles3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(0.5, 0.5) * s
+	q.material = _flame_mat
+	fl.mesh = q
+	fl.amount = 22
+	fl.lifetime = 0.7
+	fl.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	fl.emission_sphere_radius = 0.22 * s
+	fl.direction = Vector3.UP
+	fl.spread = 12.0
+	fl.initial_velocity_min = 0.6 * s
+	fl.initial_velocity_max = 1.3 * s
+	fl.gravity = Vector3(0, 0.6, 0)
+	fl.scale_amount_min = 0.7
+	fl.scale_amount_max = 1.3
+	var sc := Curve.new()
+	sc.add_point(Vector2(0, 0.6))
+	sc.add_point(Vector2(0.3, 1.0))
+	sc.add_point(Vector2(1, 0.15))
+	fl.scale_amount_curve = sc
+	var g := Gradient.new()
+	g.set_color(0, Color(1.0, 0.85, 0.45, 0.9))
+	g.set_color(1, Color(0.8, 0.12, 0.02, 0.0))
+	g.add_point(0.4, Color(1.0, 0.45, 0.1, 0.75))
+	fl.color_ramp = g
+	fl.position = p
+	fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	fl.set_meta("keep", true)
+	add_child(fl)
+
+## Asch-Furt nach der Nacht der Feuer: glimmende Dächer, Rauch, dunkle Fenster
+func burn_village() -> void:
+	if has_meta("burned"):
+		return
+	set_meta("burned", true)
+	for hs in spots.get("houses", []):
+		var c: Vector3 = hs.center
+		for k in 3:
+			_flames(c + Vector3(randf_range(-2.0, 2.0), 3.6 + randf() * 1.2, randf_range(-2.0, 2.0)), 1.4)
+		var smoke := CPUParticles3D.new()
+		var q := QuadMesh.new()
+		q.size = Vector2(2.2, 2.2)
+		var sm := StandardMaterial3D.new()
+		sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		sm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		sm.vertex_color_use_as_albedo = true
+		sm.albedo_texture = _flame_mat.albedo_texture
+		q.material = sm
+		smoke.mesh = q
+		smoke.amount = 10
+		smoke.lifetime = 5.0
+		smoke.direction = Vector3.UP
+		smoke.spread = 15.0
+		smoke.initial_velocity_min = 1.0
+		smoke.initial_velocity_max = 2.0
+		smoke.gravity = Vector3(0.4, 0.3, 0)
+		smoke.scale_amount_min = 1.0
+		smoke.scale_amount_max = 2.5
+		smoke.color = Color(0.08, 0.07, 0.07, 0.55)
+		smoke.position = c + Vector3(0, 5.0, 0)
+		add_child(smoke)
+		_light(c + Vector3(0, 4.5, 0), Color(1.0, 0.45, 0.15), 2.5, 12.0)
+	for g in VillageKit.glass:
+		g.emission_energy_multiplier = 0.0
+	VillageKit.glass.clear()
 
 func _lantern(p: Vector3) -> void:
 	Toon.cyl(self, 0.07, 0.09, 2.6, p + Vector3(0, 1.3, 0), m_wood_dark, 6)
@@ -301,7 +386,11 @@ func _prop(name: String, p: Vector3, rot_y := 0.0, s := 1.0) -> Node3D:
 func _tent(p: Vector3, rot: float, mt: Material) -> void:
 	var tent := PrismMesh.new()
 	tent.size = Vector3(3.0, 2.0, 3.6)
-	var mi := Toon.mesh(self, tent, mt, p + Vector3(0, 1.0, 0), Vector3(0, rot, 0))
+	var canvas := Toon.tri("res://assets/village/T_Plaster_BaseColor.png", Color(0.62, 0.55, 0.45) if mt == m_cloth else Color(0.32, 0.38, 0.5), 0.35, 0.9)
+	var mi := Toon.mesh(self, tent, canvas, p + Vector3(0, 1.0, 0), Vector3(0, rot, 0))
+	# Zeltstangen und Seile
+	for sz in [-1.0, 1.0]:
+		Toon.cyl(self, 0.04, 0.04, 2.1, p + Vector3(0, 1.05, 0) + Vector3(0, 0, sz * 1.85).rotated(Vector3.UP, rot), m_wood_dark, 5)
 	mi.name = "Tent"
 	var sb := StaticBody3D.new()
 	var cs := CollisionShape3D.new()

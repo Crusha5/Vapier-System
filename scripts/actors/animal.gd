@@ -23,7 +23,7 @@ func setup(w: Node, at: Vector3) -> Animal:
 	return self
 
 func _build_model() -> void:
-	model = QuadModel.new("grazer")
+	model = QuadModel.new("stag" if randf() < 0.25 else "grazer")
 
 func _height() -> float:
 	return 1.3
@@ -32,6 +32,12 @@ func _ready() -> void:
 	super._ready()
 	add_to_group("hittable")
 	add_to_group("animals")
+
+func die() -> void:
+	var was := alive
+	super.die()
+	if was and world and world.has_method("on_animal_killed"):
+		world.on_animal_killed(self)
 
 func feedable() -> bool:
 	return (not alive and last_hit_t < 40.0) or (alive and asleep)

@@ -16,6 +16,8 @@ var hud: Hud
 var menu: SystemWindow
 var audio: Sfx
 var story: Story
+var quests: Quests
+var _last_story := -1
 var title: Control
 var loading: Label
 var sense_rect: ColorRect
@@ -145,8 +147,13 @@ func _build_world() -> void:
 	story = Story.new()
 	story.w = self
 	add_child(story)
+	quests = Quests.new()
+	quests.w = self
+	add_child(quests)
 	_build_fx_assets()
 	_spawn_world()
+	if PlayerStats.flag("village_fate", "") == "burned":
+		places.burn_village()
 	_place_player()
 	PlayerStats.player_died.connect(_on_player_died)
 	PlayerStats.leveled_up.connect(func(l):
@@ -181,8 +188,12 @@ func _place_player() -> void:
 
 # ---------- Figuren ----------
 
+const VILLAGERS := ["hanna", "lenz", "greta", "oswin", "pip", "mara", "hallin", "ilse", "bo"]
+
 func _spawn_npc(id: String, name: String, look: Dictionary, at: Vector3, role := "villager", house := -1) -> HumanNpc:
 	if PlayerStats.is_dead(id):
+		return null
+	if PlayerStats.flag("village_fate", "") == "burned" and (id in VILLAGERS or role == "villager"):
 		return null
 	var n := HumanNpc.new()
 	n.setup(id, name, look, self, at + Vector3(0, 0.2, 0), role)
@@ -334,7 +345,7 @@ func _build_title() -> void:
 	var qr := SystemWindow.quality_row(_refresh_title)
 	qr.custom_minimum_size = Vector2(280, 0)
 	v.add_child(qr)
-	v.add_child(H.lbl("v0.5.0 · Open-World-Prototyp", 9, Color(H.MUTED, 0.6), H.F_MONO))
+	v.add_child(H.lbl("v0.6.0 · Akt 2", 9, Color(H.MUTED, 0.6), H.F_MONO))
 
 func _refresh_title() -> void:
 	if title:
@@ -420,7 +431,10 @@ func begin_talk(focus: Variant) -> void:
 	_talk_focus = focus
 	player.input_dir = Vector2.ZERO
 	if focus is HumanNpc:
-		(focus as HumanNpc).talking = true
+		var hn := focus as HumanNpc
+		# Schlafende, Überwältigte, Liegende drehen sich nicht zum Gespräch um
+		if not hn.asleep and not hn.downed and hn.alive and hn.state != "fixed":
+			hn.talking = true
 
 func end_talk() -> void:
 	if _talk_focus is HumanNpc and is_instance_valid(_talk_focus):
@@ -638,6 +652,13 @@ func on_enemy_killed(e: Enemy) -> void:
 		spawn_loot(Items.random_drop(lvl), e.global_position)
 	if e.kind == "beast" and randf() < 0.5:
 		PlayerStats.pick_vial("beast")
+	quests.on_kill(e)
+
+func on_animal_killed(a: Node) -> void:
+	quests.on_animal_killed(a)
+
+func on_peaceful_attacked(e: Enemy) -> void:
+	quests.on_peaceful_attacked(e)
 
 # ---------- Interaktion ----------
 
@@ -690,6 +711,12 @@ func _update_interact() -> void:
 			_set_interact("feed", "TRINKEN" if best is Animal else "ÜBERWÄLTIGT", best)
 			return
 	var sp: Dictionary = places.spots
+	# Ortsprüfungen auf dem Boden (Höhe egal, z. B. auf einem Sockel stehend)
+	pp.y = terrain.height_at(pp.x, pp.z)
+	var qi: Array = quests.interaction(pp)
+	if not qi.is_empty():
+		_set_interact(qi[0], qi[1])
+		return
 	if int(PlayerStats.s.story) == 3 and not PlayerStats.flag("jory_resolved") and npcs.has("jory") and is_instance_valid(npcs.jory) and npcs.jory.alive:
 		if pp.distance_to(sp.cage + Vector3(1.4, 0, 0)) < 1.6:
 			_set_interact("cage", "KÄFIG ÖFFNEN", null, "Lenz sieht zu!" if _guard_watching() else "")
@@ -742,14 +769,16 @@ func _interact() -> void:
 			PlayerStats.add_xp(80)
 			story.say([{"who": "", "text": "In der Opferschale schwimmt frisches Blut. Daneben ein Zeichen: zwei verschlungene Schlangen – rot und schwarz."},
 				{"who": "DIE ERSTE NACHT", "text": "Meine Kinder. Sie warten seit Jahrhunderten auf jemanden wie dich. Sie werden dich finden."},
-				{"who": "SYSTEM", "text": "Fraktion entdeckt: Der Kult der Ersten Nacht."}])
+				{"who": "SYSTEM", "text": "Fraktion entdeckt: Der Kult der Ersten Nacht."}], [], func(_j): quests.on_shrine_read())
 		"lander":
 			PlayerStats.set_flag("lander_read")
 			PlayerStats.add_xp(60)
 			spawn_loot(Items.random_drop(int(PlayerStats.s.level), 0.1, 1), places.spots.lander + Vector3(2, 0, 2))
 			story.say([{"who": "", "text": "Ein Logbuch, halb verbrannt: „Tag 1 nach dem Schleier. Wir versuchen, durchzubrechen. Die Instrumente zeigen … etwas Lebendiges. Es atmet.“"}])
 		_:
-			if interact_id.begins_with("obelisk:"):
+			if interact_id.begins_with("q_"):
+				quests.interact(interact_id)
+			elif interact_id.begins_with("obelisk:"):
 				var i := int(interact_id.substr(8))
 				PlayerStats.set_flag("obelisk_%d" % i)
 				PlayerStats.add_xp(50)
@@ -760,11 +789,15 @@ func _interact() -> void:
 					"Der Schleier ist kein Sturm. Er ist eine Haut. Und darunter wächst etwas.",
 					"Die Alten haben die Wiege nicht verlassen. Sie sind noch hier. In jedem Stein. In jedem Tropfen.",
 				]
-				story.say([{"who": "", "text": "Die Glyphen glühen auf, als du sie berührst."}, {"who": "DIE ERSTE NACHT", "text": lore[i % lore.size()]}])
+				story.say([{"who": "", "text": "Die Glyphen glühen auf, als du sie berührst."}, {"who": "DIE ERSTE NACHT", "text": lore[i % lore.size()]}], [], func(_j): quests.on_obelisk())
 				hud.red_flash = 0.4
 
 func _talk(n: HumanNpc) -> void:
 	if n == null or not is_instance_valid(n):
+		return
+	if n.npc_id == "hanna" and quests.talk_hanna(n):
+		return
+	if quests.talk(n):
 		return
 	match n.npc_id:
 		"hanna":
@@ -1011,14 +1044,19 @@ func _update_compass() -> void:
 				marks.append([sp.cage, Color(1.0, 0.8, 0.35), "JORY"])
 		4:
 			marks.append([sp.ruin_altar, Color(1.0, 0.2, 0.3), "RUINE"])
-	if PlayerStats.flag("cult_lead") and not PlayerStats.flag("shrine_read"):
+	if PlayerStats.flag("cult_lead") and not PlayerStats.flag("shrine_read") and st < 5:
 		marks.append([sp.shrine, Color(0.9, 0.2, 0.3), "SCHREIN"])
+	marks.append_array(quests.marks())
 	hud.compass_marks = marks
 
 func _director() -> void:
 	if not PlayerStats.s.started:
 		return
 	_check_events()
+	if int(PlayerStats.s.story) != _last_story:
+		_last_story = int(PlayerStats.s.story)
+		quests.on_story(_last_story)
+	quests.tick()
 	# Tamas läuft ins Dorf
 	if npcs.has("tamas") and is_instance_valid(npcs.tamas) and npcs.tamas.alive and PlayerStats.flag("tamas", "") in ["helped", "sipped"]:
 		if npcs.tamas.global_position.distance_to(places.spots.village) < 30.0 and not PlayerStats.flag("tamas_arrived"):

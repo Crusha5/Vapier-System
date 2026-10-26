@@ -102,7 +102,7 @@ func _tabs() -> void:
 		c.queue_free()
 	var free_attr := int(PlayerStats.s.attr_points)
 	var free_sk := int(PlayerStats.s.skill_points)
-	var tabs := [["status", "STATUS" + (" •" if free_attr > 0 else "")], ["gear", "AUSRÜSTUNG"], ["blood", "BLUT"], ["skills", "FÄHIGKEITEN" + (" •" if free_sk > 0 else "")], ["chronicle", "CHRONIK"]]
+	var tabs := [["status", "STATUS" + (" •" if free_attr > 0 else "")], ["gear", "AUSRÜSTUNG"], ["blood", "BLUT"], ["skills", "FÄHIGKEITEN" + (" •" if free_sk > 0 else "")], ["chronicle", "AUFGABEN"]]
 	if shop_open:
 		tabs.insert(0, ["shop", "HANDEL"])
 	for t in tabs:
@@ -293,6 +293,27 @@ func _chronicle() -> void:
 	v.add_child(H.lbl(PlayerStats.story_title(), 15, H.FG, H.F_BOLD))
 	v.add_child(H.wrap(PlayerStats.story_text(), 12))
 	body.add_child(c)
+	# Nebenaufgaben
+	if world and world.get("quests") != null:
+		var js: Array = world.quests.journal()
+		body.add_child(H.caps("Nebenaufgaben", H.CYAN))
+		if js.is_empty():
+			body.add_child(H.wrap("Noch keine. Sprich mit den Leuten in Asch-Furt – viele brauchen Hilfe.", 12))
+		for j in js:
+			var active: bool = j.state == "aktiv"
+			var jc := H.card("CardOn" if active else "CardDim")
+			var jv := H.vbox(2)
+			jc.add_child(jv)
+			var head := H.hbox(8)
+			var tl := H.lbl(j.title, 14, H.FG if active else H.MUTED, H.F_BOLD)
+			tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			head.add_child(tl)
+			head.add_child(H.lbl(String(j.state).to_upper(), 10, H.CYAN if active else (H.GOLD if j.state == "erledigt" else H.RED), H.F_MONO))
+			jv.add_child(head)
+			jv.add_child(H.lbl("von " + String(j.giver), 10, H.MUTED, H.F_SEMI))
+			if active:
+				jv.add_child(H.wrap(j.text, 12))
+			body.add_child(jc)
 	body.add_child(H.caps("Tägliche Aufgaben des Protokolls (Echtzeit)", H.CYAN))
 	if PlayerStats.s.daily.has("quests"):
 		for q in PlayerStats.s.daily.quests:
