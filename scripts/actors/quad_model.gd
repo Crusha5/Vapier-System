@@ -13,6 +13,9 @@ const DEF := {
 	"reisser": {"file": "res://assets/animals/Wolf.glb", "height": 1.15, "tint": Color(0.38, 0.32, 0.34), "prefix": "AnimalArmature|",
 		"idle": "Idle", "walk": "Walk", "run": "Gallop", "graze": "Eating", "dead": "Death", "lie": "Idle_2_HeadLow", "hurt": "Idle_HitReact_Left",
 		"attack": "Attack", "windup": "Idle_2_HeadLow", "alert": "Idle_2"},
+	"alpha": {"file": "res://assets/animals/Wolf.glb", "height": 1.65, "tint": Color(0.2, 0.16, 0.18), "prefix": "AnimalArmature|",
+		"idle": "Idle", "walk": "Walk", "run": "Gallop", "graze": "Eating", "dead": "Death", "lie": "Idle_2_HeadLow", "hurt": "Idle_HitReact_Left",
+		"attack": "Attack", "windup": "Idle_2_HeadLow", "alert": "Idle_2"},
 }
 
 var kind := "grazer"
@@ -60,10 +63,10 @@ func _ready() -> void:
 				continue
 			var nm := m.duplicate() as StandardMaterial3D
 			var low := m.resource_name.to_lower()
-			if kind == "reisser" and (low.contains("eye") or low.contains("black") and m.albedo_color.v < 0.1):
+			if kind in ["reisser", "alpha"] and (low.contains("eye") or low.contains("black") and m.albedo_color.v < 0.1):
 				nm.emission_enabled = true
-				nm.emission = Color(1.0, 0.1, 0.12)
-				nm.emission_energy_multiplier = 2.5
+				nm.emission = Color(1.0, 0.1, 0.12) if kind == "reisser" else Color(1.0, 0.55, 0.1)
+				nm.emission_energy_multiplier = 2.5 if kind == "reisser" else 4.0
 			else:
 				var c := m.albedo_color
 				var l := c.r * 0.3 + c.g * 0.59 + c.b * 0.11

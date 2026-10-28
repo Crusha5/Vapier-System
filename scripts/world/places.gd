@@ -47,13 +47,28 @@ func build(t: Terrain) -> void:
 	_lander(Vector2(150, -175))
 	for p in [Vector2(-110, -40), Vector2(30, -190), Vector2(-150, 30), Vector2(180, 90), Vector2(-40, 220)]:
 		_obelisk(p)
+	_mill()
+	_hunter_hut()
+	_barrow()
+	_morrow()
+	for d in Terrain.DENS:
+		_den(d)
+	for a in Terrain.ALTARS:
+		_blood_altar(a)
+	_page_spots()
 	altar_core.set_meta("keep", true)
 	cage_door.set_meta("keep", true)
 	var n := Batcher.merge(self)
 	print("Orte: ", n, " Meshes zusammengefasst")
 
 func exclusions() -> Array:
-	return [[Terrain.VILLAGE, 32.0], [Terrain.BANDITS, 17.0], [Terrain.RUIN, 20.0], [Terrain.TOWER, 12.0], [Terrain.SHRINE, 7.0], [Vector2(150, -175), 10.0]]
+	var ex := [[Terrain.VILLAGE, 32.0], [Terrain.BANDITS, 17.0], [Terrain.RUIN, 20.0], [Terrain.TOWER, 12.0], [Terrain.SHRINE, 7.0], [Vector2(150, -175), 10.0],
+		[Terrain.MILL, 10.0], [Terrain.HUT, 8.0], [Terrain.BARROW, 17.0], [Terrain.MORROW, 18.0]]
+	for d in Terrain.DENS:
+		ex.append([d, 7.0])
+	for a in Terrain.ALTARS:
+		ex.append([a, 3.5])
+	return ex
 
 # ---------- Bausteine ----------
 
@@ -692,11 +707,234 @@ func _obelisk(c: Vector2) -> void:
 		spots.obelisks = []
 	spots.obelisks.append(p)
 
+# ---------- Erkundungsorte (v0.7) ----------
+
+var mill_wheel: Node3D
+
+func _mill() -> void:
+	var c := Terrain.MILL
+	var rot := -PI * 0.5
+	var info := _house(c, rot, 8.0, 6.0)
+	var base: Vector3 = info.center
+	spots.mill = base
+	var b := Basis(Vector3.UP, rot)
+	# Wasserrad an der Flussseite
+	mill_wheel = Node3D.new()
+	mill_wheel.position = base + b * Vector3(0, 1.7, 3.75)
+	mill_wheel.rotation.y = rot
+	mill_wheel.set_meta("keep", true)
+	add_child(mill_wheel)
+	for k in 10:
+		var a := TAU * k / 10.0
+		Toon.box(mill_wheel, Vector3(0.12, 2.1, 0.5), Vector3(cos(a) * 1.0, sin(a) * 1.0, 0), m_wood_dark, Vector3(0, 0, a + PI * 0.5))
+		Toon.box(mill_wheel, Vector3(0.55, 0.08, 0.8), Vector3(cos(a) * 2.05, sin(a) * 2.05, 0), m_plank, Vector3(0, 0, a + PI * 0.5))
+	for z in [-0.42, 0.42]:
+		Toon.cyl(mill_wheel, 2.0, 2.0, 0.08, Vector3(0, 0, z), m_wood, 16, Vector3(PI * 0.5, 0, 0))
+	Toon.cyl(mill_wheel, 0.18, 0.18, 1.4, Vector3.ZERO, m_metal, 8, Vector3(PI * 0.5, 0, 0))
+	# Säcke und Kisten vor der Tür
+	var front := base + b * Vector3(0, 0, -4.6)
+	_crate(front + b * Vector3(2.4, 0, 0), 0.9, 0.3)
+	_crate(front + b * Vector3(2.9, 0, 0.9), 0.8, 1.1)
+	_prop("cart", front + b * Vector3(-3.0, 0, -1.0), rot + 0.4, 0.8)
+	_barrel(front + b * Vector3(-1.8, 0, 0.6))
+	_lantern(front + b * Vector3(1.4, 0, -0.6))
+	spots.mill_in = base + b * Vector3(0.6, 0, 0.6)
+	spots.mill_chest = base + b * Vector3(-3.0, 0, -0.3)
+	spots.mill_front = front
+
+func _hunter_hut() -> void:
+	var c := Terrain.HUT
+	var info := _house(c, 0.5, 6.0, 6.0)
+	var base: Vector3 = info.center
+	spots.hut = base
+	var b := Basis(Vector3.UP, 0.5)
+	var front := base + b * Vector3(0, 0, -5.0)
+	_campfire(front + b * Vector3(2.5, 0, -1.5))
+	# Trockengestell mit Fellen
+	var rack := front + b * Vector3(-2.6, 0, -0.8)
+	for sx in [-1.0, 1.0]:
+		Toon.box(self, Vector3(0.12, 2.0, 0.12), rack + b * Vector3(sx * 1.1, 1.0, 0), m_wood_dark)
+	Toon.box(self, Vector3(2.5, 0.1, 0.1), rack + Vector3(0, 1.95, 0), m_wood_dark, Vector3(0, 0.5, 0))
+	var fur := Toon.mat(Color(0.42, 0.33, 0.25), {"rough": 1.0, "grime": 0.6})
+	Toon.box(self, Vector3(0.8, 1.1, 0.04), rack + b * Vector3(-0.45, 1.35, 0), fur, Vector3(0, 0.5, 0.05))
+	Toon.box(self, Vector3(0.7, 0.9, 0.04), rack + b * Vector3(0.5, 1.45, 0), Toon.mat(Color(0.55, 0.5, 0.45), {"rough": 1.0}), Vector3(0, 0.5, -0.04))
+	_prop("tub", front + b * Vector3(1.0, 0, 1.0), 0.0, 0.5)
+	_crate(front + b * Vector3(-1.0, 0, 1.2), 0.8, 0.2)
+	spots.hut_in = base + b * Vector3(0.4, 0, 0.2)
+	spots.hut_chest = base + b * Vector3(-2.0, 0, -0.6)
+	spots.hut_front = front
+
+func _barrow() -> void:
+	var c := Terrain.BARROW
+	var base := gp(c.x, c.y)
+	spots.barrow = base
+	var turf := Toon.mat(Color(0.26, 0.31, 0.2), {"rough": 1.0, "grime": 0.5})
+	var graves: Array = []
+	for m in [[Vector3(-8, 0, -4), 5.5, 2.4], [Vector3(8, 0, -3), 5.0, 2.1], [Vector3(0, 0, -11), 7.0, 3.2]]:
+		var mp: Vector3 = base + (m[0] as Vector3)
+		mp.y = terrain.height_at(mp.x, mp.z)
+		var r: float = m[1]
+		var hgt: float = m[2]
+		Toon.sphere(self, 1.0, mp, turf, Vector3(r, hgt, r), 12)
+		var sb := StaticBody3D.new()
+		var cs := CollisionShape3D.new()
+		var sh := CylinderShape3D.new()
+		sh.radius = r * 0.82
+		sh.height = hgt * 1.6
+		cs.shape = sh
+		sb.add_child(cs)
+		sb.position = mp
+		add_child(sb)
+		# Eingang aus alten Steinen auf der Südseite
+		var e := mp + Vector3(0, 0, r * 0.86)
+		e.y = terrain.height_at(e.x, e.z)
+		for sx in [-0.9, 0.9]:
+			_box(Vector3(0.5, 2.2, 0.5), e + Vector3(sx, 1.1, 0), m_stone_old)
+		Toon.box(self, Vector3(2.4, 0.45, 0.6), e + Vector3(0, 2.35, 0), m_stone_old)
+		var dark := Toon.box(self, Vector3(1.3, 2.0, 0.1), e + Vector3(0, 1.0, -0.2), Toon.mat(Color(0.01, 0.01, 0.01)))
+		dark.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var g := Toon.box(self, Vector3(1.2, 0.08, 0.05), e + Vector3(0, 2.2, 0.31), m_glyph)
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		graves.append(e + Vector3(0, 0, 2.2))
+	spots.barrow_graves = graves
+	# Kreis aus Menhiren
+	for i in 9:
+		var a := TAU * i / 9.0 + 0.15
+		var q := gp(c.x + cos(a) * 15.0, c.y + sin(a) * 15.0)
+		var hh := 2.4 + (i % 3) * 0.7
+		_box(Vector3(0.8, hh, 0.55), q + Vector3(0, hh * 0.45, 0), m_stone_old, Vector3(0.06 * ((i % 2) * 2 - 1), -a, 0.05))
+	_light(graves[2] + Vector3(0, 2.2, -1.4), Color(0.9, 0.15, 0.2), 1.4, 9.0, false)
+
+func _morrow() -> void:
+	var c := Terrain.MORROW
+	var base := gp(c.x, c.y)
+	spots.morrow = base
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 909
+	var wall := Toon.tri("res://assets/village/T_UnevenBrick_BaseColor.png", Color(0.62, 0.6, 0.6), 0.45, 0.9, 0.6)
+	var rooms := [[Vector2(-7, -5), 7.0, 6.0, 0.2], [Vector2(6, -7), 6.0, 5.0, -0.3], [Vector2(2, 7), 8.0, 6.0, 0.1]]
+	var inside: Array = []
+	for rm in rooms:
+		var rc: Vector2 = rm[0]
+		var rw: float = rm[1]
+		var rd: float = rm[2]
+		var rr: float = rm[3]
+		var ctr := gp(c.x + rc.x, c.y + rc.y)
+		var bb := Basis(Vector3.UP, rr)
+		Toon.box(self, Vector3(rw, 0.2, rd), ctr + Vector3(0, 0.05, 0), m_stone_old, Vector3(0, rr, 0))
+		var sides := [[Vector3(0, 0, -rd * 0.5), rw, 0.0], [Vector3(0, 0, rd * 0.5), rw, 0.0], [Vector3(-rw * 0.5, 0, 0), rd, PI * 0.5], [Vector3(rw * 0.5, 0, 0), rd, PI * 0.5]]
+		for k in sides.size():
+			var sd: Array = sides[k]
+			if k == 0:
+				# Lücke statt Tür
+				for half in [-1.0, 1.0]:
+					var hl: float = float(sd[1]) * 0.5 - 0.8
+					var hh := rng.randf_range(1.2, 3.2)
+					var off := bb * ((sd[0] as Vector3) + Vector3(half * (0.8 + hl * 0.5), 0, 0))
+					_box(Vector3(hl, hh, 0.45), ctr + off + Vector3(0, hh * 0.5, 0), wall, Vector3(0, rr, 0))
+				continue
+			var hh2 := rng.randf_range(0.8, 3.4)
+			_box(Vector3(float(sd[1]), hh2, 0.45), ctr + bb * (sd[0] as Vector3) + Vector3(0, hh2 * 0.5, 0), wall, Vector3(0, rr + float(sd[2]), 0))
+		for k in 4:
+			_box(Vector3(0.6, 0.4, 0.5), ctr + Vector3(rng.randf_range(-rw, rw) * 0.6, 0.2, rng.randf_range(-rd, rd) * 0.6 + rd * 0.7), wall, Vector3(rng.randf(), rng.randf() * TAU, 0), false)
+		inside.append(ctr + bb * Vector3(rw * 0.25, 0, rd * 0.2))
+	spots.morrow_rooms = inside
+	# Eingestürzter Funkturm der Kolonie
+	var tb := gp(c.x - 11, c.y + 8)
+	var mast := Toon.mat(Color(0.42, 0.44, 0.47), {"metal": 0.6, "rough": 0.5, "grime": 0.9})
+	_cyl(1.6, 2.0, 2.4, tb + Vector3(0, 1.2, 0), wall, 10, Vector3.ZERO, true)
+	Toon.cyl(self, 0.25, 0.4, 9.0, tb + Vector3(3.6, 1.8, 0.6), mast, 6, Vector3(0, 0, -1.25))
+	for k in 5:
+		Toon.box(self, Vector3(0.08, 1.6, 0.08), tb + Vector3(1.5 + k * 1.4, 1.2 + k * 0.25, 0.6), mast, Vector3(0, 0, 0.7))
+	# Leuchtende Konsole der Kolonie
+	var cp := gp(c.x + 6, c.y - 7)
+	_box(Vector3(1.0, 1.0, 0.5), cp + Vector3(0, 0.5, 0), mast)
+	var scr := Toon.box(self, Vector3(0.8, 0.5, 0.05), cp + Vector3(0, 1.15, -0.1), Toon.mat(Color(0.1, 0.3, 0.4), {"emit": Color(0.2, 0.7, 0.9), "energy": 1.6}), Vector3(-0.3, 0, 0))
+	scr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sl := _light(cp + Vector3(0, 1.5, -0.8), Color(0.3, 0.75, 1.0), 1.2, 6.0)
+	sl.set_meta("spark", true)
+	spots.morrow_console = cp + Vector3(0, 0, -1.2)
+	for i in 6:
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(15.0, 21.0)
+		_rock(gp(c.x + cos(a) * r, c.y + sin(a) * r) - Vector3(0, 0.4, 0), rng.randf_range(0.5, 0.9), rng.randf() * TAU, i % 2 == 0)
+
+func _den(c: Vector2) -> void:
+	var base := gp(c.x, c.y)
+	if not spots.has("dens"):
+		spots.dens = []
+	spots.dens.append(base)
+	var rock := Toon.tri("res://assets/nature/Rocks_Diffuse.png", Color(0.5, 0.48, 0.5), 0.35, 0.7, 0.6)
+	# Höhlenhügel mit dunklem Schlund
+	var cave := base + Vector3(0, 0, -4.0)
+	cave.y = terrain.height_at(cave.x, cave.z)
+	Toon.sphere(self, 1.0, cave, rock, Vector3(4.2, 2.6, 3.4), 10)
+	var sb := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var sh := CylinderShape3D.new()
+	sh.radius = 3.2
+	sh.height = 4.0
+	cs.shape = sh
+	sb.add_child(cs)
+	sb.position = cave
+	add_child(sb)
+	var hole := Toon.sphere(self, 1.0, cave + Vector3(0, 0.6, 3.05), Toon.mat(Color(0.0, 0.0, 0.0)), Vector3(1.3, 1.1, 0.5), 8)
+	hole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for k in 3:
+		var a := PI * 0.25 + k * PI * 0.55
+		_rock(gp(c.x + cos(a) * 6.5, c.y + sin(a) * 6.5) - Vector3(0, 0.3, 0), 0.6 + k * 0.1, a, k == 1)
+	var bone := Toon.mat(Color(0.85, 0.82, 0.74), {"rough": 0.8})
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(c.x * 13.0 + c.y)
+	for k in 9:
+		var q := base + Vector3(rng.randf_range(-3.5, 3.5), 0, rng.randf_range(-1.5, 3.0))
+		q.y = terrain.height_at(q.x, q.z) + 0.05
+		Toon.cyl(self, 0.04, 0.05, rng.randf_range(0.4, 0.8), q, bone, 5, Vector3(PI * 0.5, rng.randf() * TAU, 0))
+	Toon.sphere(self, 0.13, base + Vector3(1.2, terrain.height_at(base.x + 1.2, base.z + 1.0) - base.y + 0.1, 1.0), bone, Vector3(1, 0.8, 1.2), 6)
+
+func _blood_altar(c: Vector2) -> void:
+	var p := gp(c.x, c.y)
+	if not spots.has("altars"):
+		spots.altars = []
+	spots.altars.append(p)
+	_box(Vector3(1.8, 0.9, 1.1), p + Vector3(0, 0.45, 0), m_stone_old)
+	Toon.box(self, Vector3(2.0, 0.15, 1.3), p + Vector3(0, 0.95, 0), m_stone_old)
+	Toon.cyl(self, 0.45, 0.3, 0.3, p + Vector3(0, 1.15, 0), m_stone_old, 10)
+	var pool := Toon.cyl(self, 0.38, 0.38, 0.04, p + Vector3(0, 1.29, 0), Toon.mat(Color(0.35, 0.0, 0.03), {"emit": Color(0.7, 0.0, 0.06), "energy": 1.4, "rough": 0.15}), 10)
+	pool.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for k in 4:
+		var a := TAU * k / 4.0 + PI * 0.25
+		var q := p + Vector3(cos(a) * 1.5, 0, sin(a) * 1.1)
+		_box(Vector3(0.35, 1.6, 0.35), q + Vector3(0, 0.8, 0), m_stone_old, Vector3(0, a, 0.05))
+		var gl := Toon.box(self, Vector3(0.37, 0.06, 0.37), q + Vector3(0, 1.2, 0), m_glyph, Vector3(0, a, 0))
+		gl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var l := _light(p + Vector3(0, 1.8, 0), Color(1.0, 0.15, 0.2), 1.5, 7.0, false)
+	l.set_meta("pulse", true)
+	fires.append([l, 1.5])
+
+## Fundorte der Logbuchseiten der „Hoffnung“
+func _page_spots() -> void:
+	spots.pages = [
+		spots.lander + Vector3(-4.0, 0, 3.5),
+		spots.mill_in,
+		spots.hut_in,
+		spots.barrow_graves[2] + Vector3(2.5, 0, 1.0),
+		spots.morrow_console + Vector3(1.4, 0, 0),
+		spots.tower + Vector3(4.0, 0, -3.0),
+		gp(-40, 223),
+		spots.dens[1] + Vector3(2.0, 0, 2.0),
+	]
+	for i in spots.pages.size():
+		var q: Vector3 = spots.pages[i]
+		spots.pages[i] = Vector3(q.x, terrain.height_at(q.x, q.z), q.z) if i > 2 else q
+
 # ---------- Laufzeit ----------
 
 func tick(delta: float, night: float) -> void:
 	VillageKit.set_night(night)
 	_t += delta
+	if mill_wheel:
+		mill_wheel.rotate_object_local(Vector3.BACK, -delta * 0.7)
 	for f in fires:
 		var l: OmniLight3D = f[0]
 		var e: float = f[1]

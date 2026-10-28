@@ -33,6 +33,8 @@ const SKILLS := {
 		"desc": "Kurzer Sprung durch die Schatten. Unverwundbar. Kurz vor einem Treffer: Zeitlupe."},
 	"blood_sense": {"name": "Blutsinn", "cost": 0, "req": {}, "path": "neutral", "slot": "sense",
 		"desc": "Du siehst Herzschläge durch Wände und frische Blutspuren."},
+	"inspect": {"name": "Inspektion", "cost": 0, "req": {}, "path": "neutral", "grant": true,
+		"desc": "Das System zeigt Stufe, Lebenskraft und Blutgruppe deiner Gegner. Mit Blutsinn siehst du es bei allen Wesen."},
 	"blood_scythe": {"name": "Blutsichel", "cost": 1, "req": {"shd": 3}, "path": "neutral", "slot": "skill1",
 		"desc": "Kreisender Blutschnitt. Kostet 12 Blut."},
 	"mending": {"name": "Heilendes Blut", "cost": 1, "req": {"humanity_min": 55}, "path": "guardian",
@@ -72,6 +74,30 @@ const STORY := [
 	{"title": "Die Nacht der Feuer", "text": "Die Wacht will Asch-Furt niederbrennen. Entscheide, auf welcher Seite du stehst."},
 	{"title": "Ende von Akt 2", "text": "Die Nacht der Feuer ist vorbei. Varek wird selbst kommen. Akt 3 folgt."},
 ]
+
+## Bestienkristalle (wie im Hörbuch: Waffen und Rüstungen werden mit Kristallen geschmiedet)
+const CRYSTALS := ["Basis", "Mittel", "Fortgeschritten", "Experte"]
+const DIG_COUNT := 6
+const PAGE_COUNT := 8
+
+## Titel: jeder errungene Titel gibt dauerhaft einen kleinen Bonus
+const TITLES := {
+	"plunderer": {"name": "Plünderer", "desc": "Öffne 10 Truhen oder Kisten", "stat": "chests", "goal": 10, "bonus": {"luck": 0.03}, "btext": "+3 % Beuteglück"},
+	"hunter": {"name": "Bestienjäger", "desc": "Erlege 25 Bestien", "stat": "beasts", "goal": 25, "bonus": {"dmg": 0.05}, "btext": "+5 % Nahkampfschaden"},
+	"wanderer": {"name": "Wanderer", "desc": "Entdecke 10 Orte", "stat": "places", "goal": 10, "bonus": {"speed": 0.04}, "btext": "+4 % Lauftempo"},
+	"pack": {"name": "Rudelbrecher", "desc": "Besiege 3 Alpha-Reißer", "stat": "alphas", "goal": 3, "bonus": {"hp": 30.0}, "btext": "+30 Max. HP"},
+	"graverobber": {"name": "Grabräuber", "desc": "Plündere 5 Gräber der Alten", "stat": "graves", "goal": 5, "bonus": {"shadow": 0.08}, "btext": "+8 % Schattenschaden"},
+	"chronist": {"name": "Chronist", "desc": "Finde alle 8 Logbuchseiten", "stat": "pages", "goal": 8, "bonus": {"xp": 0.1}, "btext": "+10 % EXP"},
+	"cartographer": {"name": "Kartenleser", "desc": "Hebe 3 vergrabene Schätze", "stat": "digs", "goal": 3, "bonus": {"luck": 0.04}, "btext": "+4 % Beuteglück"},
+	"smith": {"name": "Klingenmeister", "desc": "Werte ein Teil auf +5 auf", "stat": "max_plus", "goal": 5, "bonus": {"crit": 0.03}, "btext": "+3 % Krit"},
+	"sacrifice": {"name": "Blutpriester", "desc": "Opfere an allen 3 Blutaltären", "stat": "altars", "goal": 3, "bonus": {"thrift": 0.06}, "btext": "−6 % Blutverbrauch"},
+	"treasurer": {"name": "Schatzjäger", "desc": "Öffne 35 Truhen oder Kisten", "stat": "chests", "goal": 35, "bonus": {"luck": 0.05}, "btext": "+5 % Beuteglück"},
+	"loyal": {"name": "Treuer Wirt", "desc": "Spiele 7 Tage in Folge", "stat": "streak", "goal": 7, "bonus": {"aspd": 0.05}, "btext": "+5 % Angriffstempo"},
+	"elite": {"name": "Schrecken der Wildnis", "desc": "Besiege 10 Elite-Gegner", "stat": "elites", "goal": 10, "bonus": {"armor": 0.04}, "btext": "+4 % Rüstung"},
+}
+
+## Belohnungen der täglichen Login-Serie (Tag 1–7, danach von vorn)
+const STREAK_REWARDS := ["40 Blutsplitter", "2 Dietriche", "3 Basis-Kristalle", "Seltene Ausrüstung", "2 Mittel-Kristalle", "150 Blutsplitter + Schatzkarte", "Epische Ausrüstung + 1 Attributpunkt"]
 
 var s: Dictionary = {}
 var buffs: Dictionary = {}
@@ -144,6 +170,19 @@ func reset_game() -> void:
 		"bag": [],
 		"shards": 0,
 		"camera_fp": false,
+		# v0.7 – Erkundung und Belohnungen
+		"picks": 1,
+		"crystals": [0, 0, 0, 0],
+		"chests": {},
+		"pages": [],
+		"altars": [],
+		"maps": [],
+		"dug": [],
+		"counts": {},
+		"titles": [],
+		"streak": {"date": "", "count": 0, "best": 0},
+		"elites": {},
+		"dq": {"date": "", "n": 0},
 	}
 	buffs.clear()
 	s.hp = max_hp()
@@ -170,7 +209,7 @@ func beastliness() -> float:
 	return 1.0 - humanity() / 100.0
 
 func gear(key: String) -> float:
-	var v := 0.0
+	var v := title_bonus(key)
 	for slot in s.equip:
 		var it: Dictionary = s.equip[slot]
 		if it.is_empty():
@@ -369,6 +408,7 @@ func record_choice(text: String) -> void:
 	save_game()
 
 func add_xp(amount: int) -> void:
+	amount = int(round(amount * (1.0 + title_bonus("xp"))))
 	s.xp = int(s.xp) + amount
 	while int(s.xp) >= xp_to_next():
 		s.xp = int(s.xp) - xp_to_next()
@@ -395,6 +435,8 @@ func skill_state(id: String) -> String:
 	if has_skill(id):
 		return "owned"
 	var sk: Dictionary = SKILLS[id]
+	if sk.get("grant", false):
+		return "locked"
 	for k in sk.req:
 		if k == "humanity_min":
 			if humanity() < float(sk.req[k]):
@@ -496,6 +538,7 @@ func register_kill(kind: String, xp: int, npc_id := "", innocent := false) -> vo
 		daily_progress("kill_beast")
 	if innocent:
 		change_humanity(-10.0, "Unschuldigen getötet")
+	check_titles()
 	save_game()
 
 func mark_dead(npc_id: String) -> void:
@@ -512,6 +555,7 @@ func discover(place_id: String, name: String) -> bool:
 	system_message.emit("Entdeckt: %s" % name, "quest")
 	add_xp(40)
 	daily_progress("explore")
+	check_titles()
 	save_game()
 	return true
 
@@ -601,7 +645,7 @@ func add_item(it: Dictionary) -> bool:
 		system_message.emit("Tasche voll! Zerlege Gegenstände im System-Menü.", "warn")
 		return false
 	(s.bag as Array).append(it)
-	system_message.emit("%s: %s" % [Items.RARITY[int(it.rarity)].name, it.name], "loot%d" % int(it.rarity))
+	system_message.emit("%s: %s" % [Items.RARITY[int(it.rarity)].name, Items.title(it)], "loot%d" % int(it.rarity))
 	stats_changed.emit()
 	return true
 
@@ -629,7 +673,7 @@ func salvage(idx: int) -> void:
 	bag.remove_at(idx)
 	var v := Items.value(it)
 	s.shards = int(s.shards) + v
-	system_message.emit("Zerlegt: %s  (+%d Blutsplitter)" % [it.name, v], "mini")
+	system_message.emit("Zerlegt: %s  (+%d Blutsplitter)" % [Items.title(it), v], "mini")
 	stats_changed.emit()
 
 func shop_items() -> Array:
@@ -665,6 +709,190 @@ func buy(idx: int) -> bool:
 func add_shards(n: int) -> void:
 	s.shards = int(s.shards) + n
 	stats_changed.emit()
+
+# ---------- Erkundung, Kristalle, Titel (v0.7) ----------
+
+func count(k: String) -> int:
+	return int(s.counts.get(k, 0))
+
+func bump(k: String, n := 1) -> void:
+	s.counts[k] = count(k) + n
+	check_titles()
+
+func count_max(k: String, v: int) -> void:
+	if v > count(k):
+		s.counts[k] = v
+		check_titles()
+
+func luck() -> float:
+	return gear("luck")
+
+func title_progress(id: String) -> int:
+	var t: Dictionary = TITLES[id]
+	match String(t.stat):
+		"beasts":
+			return int(s.kills.get("beast", 0))
+		"places":
+			return (s.discovered as Array).size()
+		"pages":
+			return (s.pages as Array).size()
+		"altars":
+			return (s.altars as Array).size()
+		"streak":
+			return int(s.streak.get("best", 0))
+	return count(String(t.stat))
+
+func title_bonus(key: String) -> float:
+	var v := 0.0
+	for id in s.get("titles", []):
+		if TITLES.has(id):
+			v += float(TITLES[id].bonus.get(key, 0.0))
+	return v
+
+func check_titles() -> void:
+	if not s.has("titles"):
+		return
+	for id in TITLES:
+		if (s.titles as Array).has(id):
+			continue
+		if title_progress(id) >= int(TITLES[id].goal):
+			(s.titles as Array).append(id)
+			var old_max := max_hp()
+			s.hp = float(s.hp) + maxf(0.0, max_hp() - old_max)
+			system_message.emit("TITEL ERRUNGEN: %s  ·  %s" % [TITLES[id].name, TITLES[id].btext], "reward")
+			stats_changed.emit()
+
+func add_crystal(tier: int, n := 1, silent := false) -> void:
+	tier = clampi(tier, 0, 3)
+	s.crystals[tier] = int(s.crystals[tier]) + n
+	if not silent:
+		system_message.emit("+%d Bestienkristall (%s)" % [n, CRYSTALS[tier]], "loot%d" % tier)
+	stats_changed.emit()
+
+func crystal_name(tier: int) -> String:
+	return "%s-Kristall" % CRYSTALS[clampi(tier, 0, 3)]
+
+func add_picks(n: int) -> void:
+	s.picks = int(s.picks) + n
+	stats_changed.emit()
+
+## Schatzkarte: zeigt auf eine noch nicht gehobene Grabstelle. false, wenn alle gehoben sind.
+func add_map() -> bool:
+	var free: Array = []
+	for i in DIG_COUNT:
+		if not (s.dug as Array).has(i) and not (s.maps as Array).has(i):
+			free.append(i)
+	if free.is_empty():
+		return false
+	(s.maps as Array).append(free[randi() % free.size()])
+	system_message.emit("Schatzkarte! Ein rotes Kreuz – folge dem Kompass.", "loot2")
+	stats_changed.emit()
+	return true
+
+func upgrade_cost(it: Dictionary) -> Dictionary:
+	var nxt := Items.plus(it) + 1
+	return {"next": nxt, "tier": mini(3, (nxt - 1) / 3), "count": 1 + (nxt - 1) % 3, "shards": 15 + nxt * nxt * 8}
+
+func can_upgrade(slot: String) -> bool:
+	var it: Dictionary = s.equip.get(slot, {})
+	if it.is_empty() or Items.plus(it) >= 10:
+		return false
+	var c := upgrade_cost(it)
+	return int(s.shards) >= int(c.shards) and int(s.crystals[int(c.tier)]) >= int(c.count)
+
+func upgrade(slot: String) -> bool:
+	if not can_upgrade(slot):
+		system_message.emit("Nicht genug Kristalle oder Blutsplitter.", "warn")
+		return false
+	var it: Dictionary = s.equip[slot]
+	var c := upgrade_cost(it)
+	var old_max := max_hp()
+	s.shards = int(s.shards) - int(c.shards)
+	s.crystals[int(c.tier)] = int(s.crystals[int(c.tier)]) - int(c.count)
+	Items.upgrade(it)
+	s.hp = clampf(float(s.hp) + (max_hp() - old_max), 1.0, max_hp())
+	system_message.emit("Geschmiedet: %s" % Items.title(it), "loot%d" % mini(3, int(it.rarity)))
+	count_max("max_plus", Items.plus(it))
+	equipment_changed.emit()
+	stats_changed.emit()
+	save_game()
+	return true
+
+## Drei Kristalle einer Stufe zu einem der nächsten verschmelzen
+func refine(tier: int) -> bool:
+	if tier >= 3 or int(s.crystals[tier]) < 3 or int(s.shards) < 10:
+		return false
+	s.crystals[tier] = int(s.crystals[tier]) - 3
+	s.shards = int(s.shards) - 10
+	add_crystal(tier + 1, 1)
+	save_game()
+	return true
+
+func buy_pick() -> bool:
+	if int(s.shards) < 20:
+		system_message.emit("Nicht genug Blutsplitter.", "warn")
+		return false
+	s.shards = int(s.shards) - 20
+	add_picks(1)
+	system_message.emit("+1 Dietrich", "mini")
+	save_game()
+	return true
+
+func chest_state(id: String) -> int:
+	return int(s.chests.get(id, -1))
+
+## Tägliche Login-Serie. Gibt den Serientag zurück (0 = heute schon abgeholt).
+func check_streak() -> int:
+	if not s.get("started", false):
+		return 0
+	var today := Time.get_date_string_from_system()
+	var st: Dictionary = s.streak
+	if String(st.get("date", "")) == today:
+		return 0
+	var bias := int(Time.get_time_zone_from_system().get("bias", 0))
+	var yest := Time.get_date_string_from_unix_time(int(Time.get_unix_time_from_system()) + bias * 60 - 86400)
+	var c := int(st.get("count", 0)) + 1 if String(st.get("date", "")) == yest else 1
+	st.date = today
+	st.count = c
+	st.best = maxi(int(st.get("best", 0)), c)
+	var day := (c - 1) % 7 + 1
+	var lvl := int(s.level)
+	match day:
+		1:
+			add_shards(40)
+		2:
+			add_picks(2)
+		3:
+			add_crystal(0, 3, true)
+		4:
+			add_item(Items.random_drop(lvl, 0.0, 1))
+		5:
+			add_crystal(1, 2, true)
+		6:
+			add_shards(150)
+			add_map()
+		7:
+			add_item(Items.random_drop(lvl + 1, 0.1, 2))
+			s.attr_points = int(s.attr_points) + 1
+	system_message.emit("LOGIN-SERIE TAG %d: %s" % [c, STREAK_REWARDS[day - 1]], "reward")
+	check_titles()
+	stats_changed.emit()
+	save_game()
+	return c
+
+## Optionale System-Quest (Blut des Gegners trinken): höchstens 3 Attributpunkte pro Tag
+func drink_quest_reward() -> String:
+	var today := Time.get_date_string_from_system()
+	if String(s.dq.get("date", "")) != today:
+		s.dq = {"date": today, "n": 0}
+	if int(s.dq.n) < 3:
+		s.dq.n = int(s.dq.n) + 1
+		s.attr_points = int(s.attr_points) + 1
+		stats_changed.emit()
+		return "+1 Attributpunkt"
+	add_xp(80)
+	add_crystal(0, 1, true)
+	return "+80 EXP, 1 Basis-Kristall"
 
 # ---------- Spielstand (nur einer) ----------
 

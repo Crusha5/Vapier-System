@@ -71,7 +71,8 @@ static func make(slot: String, lvl: int, rarity: int, wtype := "") -> Dictionary
 			it.name = RELICS[randi() % RELICS.size()]
 			it.base = {"shadow": snappedf(0.06 * rm, 0.001)}
 	if rarity == 3:
-		it.name = LEGEND_PREFIX[randi() % LEGEND_PREFIX.size()] + " " + String(it.name)
+		var pre: String = LEGEND_PREFIX[randi() % LEGEND_PREFIX.size()]
+		it.name = pre + ("" if pre.ends_with("-") else " ") + String(it.name)
 	var pool: Array = (SLOT_AFFIX[slot] as Array).duplicate()
 	pool.shuffle()
 	for i in min(int(RARITY[rarity].affixes), pool.size()):
@@ -89,11 +90,32 @@ static func random_drop(lvl: int, luck := 0.0, min_rarity := 0) -> Dictionary:
 	var slot: String = ["weapon", "armor", "relic"][randi() % 3]
 	return make(slot, lvl, max(min_rarity, roll_rarity(luck)))
 
+## Aufwertung mit Bestienkristallen: jede Stufe +9 % auf die Grundwerte
+static func plus(it: Dictionary) -> int:
+	return int(it.get("plus", 0))
+
+static func title(it: Dictionary) -> String:
+	var p := plus(it)
+	return String(it.name) + (" +%d" % p if p > 0 else "")
+
+static func upgrade(it: Dictionary) -> void:
+	if not it.has("base0"):
+		it.base0 = (it.base as Dictionary).duplicate()
+	it.plus = plus(it) + 1
+	var b0: Dictionary = it.base0
+	for k in b0:
+		var v := float(b0[k]) * (1.0 + 0.12 * float(it.plus))
+		it.base[k] = snappedf(v, 0.1 if k == "atk" or k == "hp" else 0.001)
+	# Jede Stufe stärkt zusätzlich die Kerneigenschaft des Teils
+	var core := {"weapon": ["dmg", 0.04], "armor": ["hp", 8.0 + float(it.lvl)], "relic": ["shadow", 0.04]}
+	var c: Array = core.get(it.slot, ["dmg", 0.0])
+	it.aff[c[0]] = snappedf(float(it.aff.get(c[0], 0.0)) + float(c[1]), 0.001)
+
 static func color(it: Dictionary) -> Color:
 	return RARITY[int(it.rarity)].color
 
 static func value(it: Dictionary) -> int:
-	return int(pow(int(it.rarity) + 1, 2) * (int(it.lvl) + 3))
+	return int(pow(int(it.rarity) + 1, 2) * (int(it.lvl) + 3)) + plus(it) * 12
 
 static func price(it: Dictionary) -> int:
 	return value(it) * 3

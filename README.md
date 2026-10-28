@@ -4,6 +4,18 @@ Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisi
 
 **Veyra** – eine Kolonie, seit zwölf Jahren vom **Schleier** (einem roten Sturm) von der Erde abgeschnitten. Soldat **Kael** hat sich geweigert, das Dorf Morrow niederzubrennen. Kommandant Varek hat ihn erschossen und in den Ruinen der Alten liegen lassen. Dort erweckt ihn **die Erste Nacht** – als Blutgeborenen, mit einem Protokoll im Kopf.
 
+## v0.7 – Schätze, Erkundung, Belohnungen
+
+- **45 Schätze in der Welt:** Kisten (füllen sich nach zwei Spieltagen neu), verschlossene Truhen (Dietrich oder STR 7), Gräber der Alten (oft erhebt sich ein Grabwächter) und blutgebundene Truhen, die nur mit **Blutsinn** sichtbar sind. Mit Blutsinn leuchten Schätze durch Wände und der Kompass zeigt den nächsten. Glückstreffer mit doppelter Beute.
+- **Bestienkristalle** (Basis, Mittel, Fortgeschritten, Experte) wie im Hörbuch: Ausrüstung bei Oswin bis **+10 schmieden**, Kristalle veredeln, Dietriche kaufen.
+- **Neue Orte:** Alte Mühle mit Wasserrad, Branns Jägerhütte, Hügelgräber der Alten, Morrow-Station (Ruine), drei Wolfsbaue, drei Blutaltäre.
+- **Elite-Gegner:** Alpha-Reißer in den Wolfsbauen (kehren jeden Tag zurück) und Grabwächter. Sie lassen Kristalle und seltene Ausrüstung fallen.
+- **Optionale System-Quests:** Besiegte Gegner – „Trinke das Blut deines Gegners“ in 15 s für einen Attributpunkt. Neue Fähigkeit **Inspektion** nach dem ersten Sieg (Stufe, HP, Blutgruppe).
+- **Sammeln:** 8 Logbuchseiten der „Hoffnung“ (alle zusammen: legendäres Relikt), Blutaltäre (+1 Attribut), Schatzkarten mit vergrabenen Schätzen.
+- **12 Titel** mit dauerhaften Boni, **tägliche Login-Serie** (7 Tage mit steigenden Belohnungen).
+- **Reiter WELT:** Karte mit entdeckten Orten, Erkundung in Prozent, **Schattenreise** (Schnellreise), Sammlung, Titel und Serie.
+- APK ist jetzt fest signiert: Updates installieren über die alte Version.
+
 ## v0.6 – Aufgaben und Akt 2
 
 - **Akt 2 „Die Kinder der Nacht“:** Schrein des Kults → drei Blutsteine → nächtliche Versammlung mit Seherin Ilva (beitreten, eigener Weg oder angreifen) → Vareks Befehl im Wachturm → **Die Nacht der Feuer**: Asch-Furt warnen oder nicht, das Dorf verteidigen oder brennen lassen. Unumkehrbar, mit Folgen in der Chronik.
@@ -55,4 +67,4 @@ Open-World-RPG für Android (Godot 4.7, Compatibility-Renderer), düster-stilisi
 Jeder Push auf `main` baut per GitHub Actions eine APK:
 https://github.com/Crusha5/Vapier-System/releases/latest/download/sanguine-protocol.apk
 
-Damit Updates ohne Neuinstallation gehen, das Repo-Secret `KEYSTORE_PASSWORD` setzen.
+Die APK wird mit einem festen Schlüssel signiert (Passwort im Workflow, ein gesetztes Repo-Secret `KEYSTORE_PASSWORD` hat Vorrang), damit Updates über die alte Version installiert werden können.

@@ -102,7 +102,7 @@ func _tabs() -> void:
 		c.queue_free()
 	var free_attr := int(PlayerStats.s.attr_points)
 	var free_sk := int(PlayerStats.s.skill_points)
-	var tabs := [["status", "STATUS" + (" •" if free_attr > 0 else "")], ["gear", "AUSRÜSTUNG"], ["blood", "BLUT"], ["skills", "FÄHIGKEITEN" + (" •" if free_sk > 0 else "")], ["chronicle", "AUFGABEN"]]
+	var tabs := [["status", "STATUS" + (" •" if free_attr > 0 else "")], ["gear", "AUSRÜSTUNG"], ["blood", "BLUT"], ["skills", "KRÄFTE" + (" •" if free_sk > 0 else "")], ["chronicle", "AUFGABEN"], ["world", "WELT"]]
 	if shop_open:
 		tabs.insert(0, ["shop", "HANDEL"])
 	for t in tabs:
@@ -135,6 +135,8 @@ func rebuild() -> void:
 			_chronicle()
 		"shop":
 			_shop()
+		"world":
+			_world()
 
 func _kv(k: String, v: String, vc := H.FG) -> HBoxContainer:
 	var h := H.hbox(6)
@@ -273,7 +275,10 @@ func _skills() -> void:
 							req.append("Menschlichkeit ≤ %d" % int(sk.req[k]))
 						_:
 							req.append("%s %d" % [String(k).to_upper(), int(sk.req[k])])
-				v.add_child(H.lbl(("Braucht: " + ", ".join(req) if req.size() > 0 else "Frei") + "  ·  %d SP" % int(sk.cost), 10, H.GOLD if st == "ready" else H.MUTED, H.F_MONO))
+				if sk.get("grant", false):
+					v.add_child(H.lbl("Wird vom System verliehen", 10, H.MUTED, H.F_MONO))
+				else:
+					v.add_child(H.lbl(("Braucht: " + ", ".join(req) if req.size() > 0 else "Frei") + "  ·  %d SP" % int(sk.cost), 10, H.GOLD if st == "ready" else H.MUTED, H.F_MONO))
 			if st == "ready":
 				var b := H.btn("Lernen", func(): PlayerStats.learn_skill(id))
 				b.custom_minimum_size = Vector2(76, 38)
@@ -351,7 +356,7 @@ func _item_card(it: Dictionary, buttons: Array, compare := {}) -> PanelContainer
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(v)
 	var head := H.hbox(6)
-	head.add_child(H.lbl(String(it.name), 14, col, H.F_BOLD))
+	head.add_child(H.lbl(Items.title(it), 14, col, H.F_BOLD))
 	var sub := "%s · %s · Stufe %d" % [Items.SLOTS[it.slot], Items.RARITY[int(it.rarity)].name, int(it.lvl)]
 	if it.slot == "weapon":
 		sub += " · " + String(Items.WEAPONS[it.type].desc)
@@ -372,7 +377,22 @@ func _item_card(it: Dictionary, buttons: Array, compare := {}) -> PanelContainer
 		bv.add_child(btn)
 	return c
 
+func _valuables() -> void:
+	var s := PlayerStats.s
+	var c := H.card("CardDim")
+	var g := GridContainer.new()
+	g.columns = 3
+	g.add_theme_constant_override("h_separation", 18)
+	c.add_child(g)
+	for t in 4:
+		g.add_child(_kv(PlayerStats.crystal_name(t), "%d" % int(s.crystals[t]), Items.RARITY[t].color))
+	g.add_child(_kv("Dietriche", "%d" % int(s.picks)))
+	g.add_child(_kv("Schatzkarten", "%d" % (s.maps as Array).size(), Color(1.0, 0.45, 0.35)))
+	body.add_child(c)
+
 func _gear() -> void:
+	body.add_child(H.caps("Wertsachen", H.GOLD))
+	_valuables()
 	body.add_child(H.caps("Angelegt  ·  Blutsplitter: %d" % int(PlayerStats.s.shards), H.CYAN))
 	for slot in ["weapon", "armor", "relic"]:
 		var it: Dictionary = PlayerStats.s.equip.get(slot, {})
@@ -412,12 +432,236 @@ func _shop() -> void:
 		var eq: Dictionary = PlayerStats.s.equip.get(it.slot, {})
 		body.add_child(_item_card(it, [["Kaufen ◆%d" % p, _buy.bind(i), "BtnRed", int(PlayerStats.s.shards) < p]], eq))
 	body.add_child(H.wrap("Tipp: Gegenstände aus der Tasche zerlegen bringt Blutsplitter.", 11))
+	# Schmieden mit Bestienkristallen
+	body.add_child(H.caps("Schmieden  ·  Bestienkristalle machen deine Ausrüstung stärker", H.GOLD))
+	_valuables()
+	for slot in ["weapon", "armor", "relic"]:
+		var it: Dictionary = PlayerStats.s.equip.get(slot, {})
+		if it.is_empty():
+			continue
+		var cc := H.card("Card")
+		var h := H.hbox(8)
+		cc.add_child(h)
+		var v := H.vbox(1)
+		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(v)
+		v.add_child(H.lbl(Items.title(it), 14, Items.color(it), H.F_BOLD))
+		if Items.plus(it) >= 10:
+			v.add_child(H.lbl("Höchste Stufe erreicht", 10, H.GOLD, H.F_MONO))
+		else:
+			var cost := PlayerStats.upgrade_cost(it)
+			v.add_child(H.lbl("→ +%d   ◆%d  ·  %d× %s" % [int(cost.next), int(cost.shards), int(cost.count), PlayerStats.crystal_name(int(cost.tier))], 11, H.FG, H.F_MONO))
+			v.add_child(H.lbl("Je Stufe: +12 % Grundwerte und mehr Kernkraft", 10, H.MUTED, H.F_REG))
+			var sl: String = slot
+			var b := H.btn("Schmieden", func():
+				if PlayerStats.upgrade(sl) and world:
+					world.sfx("level")
+				rebuild(), "BtnRed", not PlayerStats.can_upgrade(slot))
+			b.custom_minimum_size = Vector2(104, 38)
+			b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			h.add_child(b)
+		body.add_child(cc)
+	var rc := H.card("CardDim")
+	var rh := H.hbox(6)
+	rc.add_child(rh)
+	var rl := H.lbl("Veredeln: 3 Kristalle → 1 der nächsten Stufe (◆10)", 11, H.MUTED, H.F_SEMI)
+	rl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rh.add_child(rl)
+	for t in 3:
+		var tt := t
+		var rb := H.btn(PlayerStats.CRYSTALS[t], func():
+			PlayerStats.refine(tt)
+			rebuild(), "", int(PlayerStats.s.crystals[t]) < 3 or int(PlayerStats.s.shards) < 10)
+		rb.custom_minimum_size = Vector2(0, 32)
+		rh.add_child(rb)
+	body.add_child(rc)
+	var pc := H.card("CardDim")
+	var ph := H.hbox(6)
+	pc.add_child(ph)
+	var pl := H.lbl("Dietrich – öffnet verschlossene Truhen  (du hast %d)" % int(PlayerStats.s.picks), 12, H.FG, H.F_SEMI)
+	pl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ph.add_child(pl)
+	var pb := H.btn("Kaufen ◆20", func():
+		PlayerStats.buy_pick()
+		rebuild(), "BtnRed", int(PlayerStats.s.shards) < 20)
+	pb.custom_minimum_size = Vector2(110, 34)
+	ph.add_child(pb)
+	body.add_child(pc)
 
 func _buy(idx: int) -> void:
 	if PlayerStats.buy(idx):
 		if world:
 			world.sfx("quest")
 		rebuild()
+
+# ---------- Welt: Karte, Schnellreise, Sammlung, Titel, Login-Serie ----------
+
+func _world() -> void:
+	var s := PlayerStats.s
+	if world == null or world.get("treasure") == null:
+		return
+	var tr: Treasure = world.treasure
+	var zones: Array = world.ZONES
+	var found_z := 0
+	for zn in zones:
+		if (s.discovered as Array).has(zn[0]):
+			found_z += 1
+	var opened := tr.opened_count()
+	var total := zones.size() + tr.objs.size() + PlayerStats.PAGE_COUNT + tr.altars.size() + PlayerStats.DIG_COUNT
+	var found := found_z + opened + (s.pages as Array).size() + (s.altars as Array).size() + (s.dug as Array).size()
+	var pct := int(floor(100.0 * found / maxf(1.0, total)))
+	var top := H.hbox(10)
+	var tl := H.lbl("VEYRA ERKUNDET: %d %%" % pct, 15, H.GOLD, H.F_BOLD)
+	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(tl)
+	var bar := H.Bar.new(220, 6)
+	bar.set_value(pct / 100.0, H.GOLD)
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(bar)
+	body.add_child(top)
+	var mv := MapView.new()
+	mv.world = world
+	mv.custom_minimum_size = Vector2(0, 250)
+	body.add_child(mv)
+	# Schnellreise
+	body.add_child(H.caps("Schattenreise zu entdeckten Orten", H.CYAN))
+	var fg := GridContainer.new()
+	fg.columns = 3
+	fg.add_theme_constant_override("h_separation", 6)
+	fg.add_theme_constant_override("v_separation", 6)
+	body.add_child(fg)
+	var any := false
+	for zid in world.TRAVEL:
+		if not (s.discovered as Array).has(zid):
+			continue
+		any = true
+		var nm := ""
+		for zn in zones:
+			if zn[0] == zid:
+				nm = zn[1]
+		var id: String = zid
+		var b := H.btn(nm, func(): world.travel_to(id))
+		b.custom_minimum_size = Vector2(0, 34)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.clip_text = true
+		fg.add_child(b)
+	if not any:
+		body.add_child(H.wrap("Entdecke Orte, um zwischen ihnen durch die Schatten zu reisen.", 11))
+	# Sammlung
+	body.add_child(H.caps("Sammlung", H.CYAN))
+	var cc := H.card("CardDim")
+	var cg := GridContainer.new()
+	cg.columns = 2
+	cg.add_theme_constant_override("h_separation", 24)
+	cc.add_child(cg)
+	cg.add_child(_kv("Orte entdeckt", "%d / %d" % [found_z, zones.size()]))
+	cg.add_child(_kv("Truhen & Gräber geöffnet", "%d / %d" % [opened, tr.objs.size()]))
+	cg.add_child(_kv("Logbuchseiten", "%d / %d" % [(s.pages as Array).size(), PlayerStats.PAGE_COUNT], Color(0.5, 0.85, 1.0)))
+	cg.add_child(_kv("Blutaltäre", "%d / %d" % [(s.altars as Array).size(), tr.altars.size()], H.RED))
+	cg.add_child(_kv("Vergrabene Schätze", "%d / %d" % [(s.dug as Array).size(), PlayerStats.DIG_COUNT], Color(1.0, 0.45, 0.35)))
+	cg.add_child(_kv("Elite-Gegner besiegt", "%d" % PlayerStats.count("elites"), Color(1.0, 0.75, 0.3)))
+	body.add_child(cc)
+	body.add_child(H.wrap("Tipp: Mit Blutsinn leuchten Schätze durch Wände, der Kompass zeigt den nächsten – und blutgebundene Truhen werden überhaupt erst sichtbar.", 11))
+	# Login-Serie
+	var st: Dictionary = s.streak
+	var cnt := int(st.get("count", 0))
+	body.add_child(H.caps("Login-Serie: %d Tag(e) in Folge" % cnt, H.GOLD))
+	var sh := H.hbox(4)
+	body.add_child(sh)
+	for d in 7:
+		var done := cnt > 0 and d < ((cnt - 1) % 7) + 1
+		var dc := H.card("CardOn" if done else "CardDim")
+		dc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var dv := H.vbox(0)
+		dc.add_child(dv)
+		dv.add_child(H.lbl("TAG %d" % (d + 1), 10, H.GOLD if done else H.MUTED, H.F_BOLD))
+		dv.add_child(H.wrap(PlayerStats.STREAK_REWARDS[d], 9, H.FG if done else H.MUTED))
+		sh.add_child(dc)
+	# Titel
+	body.add_child(H.caps("Titel  ·  jeder gibt einen dauerhaften Bonus", H.GOLD))
+	var tg := GridContainer.new()
+	tg.columns = 2
+	tg.add_theme_constant_override("h_separation", 6)
+	tg.add_theme_constant_override("v_separation", 6)
+	body.add_child(tg)
+	for id in PlayerStats.TITLES:
+		var t: Dictionary = PlayerStats.TITLES[id]
+		var own := (s.titles as Array).has(id)
+		var c := H.card("CardOn" if own else "CardDim")
+		c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var v := H.vbox(1)
+		c.add_child(v)
+		var hh := H.hbox(6)
+		var nl := H.lbl(t.name, 13, H.GOLD if own else H.FG, H.F_BOLD)
+		nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hh.add_child(nl)
+		hh.add_child(H.lbl("✓" if own else "%d/%d" % [mini(PlayerStats.title_progress(id), int(t.goal)), int(t.goal)], 11, H.GOLD if own else H.CYAN, H.F_MONO))
+		v.add_child(hh)
+		v.add_child(H.lbl(t.desc, 10, H.MUTED, H.F_REG))
+		v.add_child(H.lbl(t.btext, 10, Color(0.5, 1.0, 0.6) if own else H.MUTED, H.F_SEMI))
+		tg.add_child(c)
+
+## Kleine Weltkarte: Gelände, entdeckte Orte, Spieler, Schatzkarten
+class MapView extends Control:
+	const HU := preload("res://scripts/ui/holo_ui.gd")
+	const R := 215.0
+	static var tex: Texture2D
+	var world: Node
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if tex == null:
+			var t: Terrain = world.terrain
+			var n := 150
+			var img := Image.create(n, n, false, Image.FORMAT_RGB8)
+			for j in n:
+				for i in n:
+					var x := -R + (i + 0.5) / n * 2.0 * R
+					var z := -R + (j + 0.5) / n * 2.0 * R
+					var h := t.height_at(x, z)
+					var c: Color
+					if h < 0.05:
+						c = Color(0.1, 0.2, 0.3)
+					elif t.road_at(x, z) > 0.45:
+						c = Color(0.42, 0.36, 0.26)
+					else:
+						var k := clampf((h - 2.0) / 30.0, 0.0, 1.0)
+						c = Color(0.16, 0.22, 0.14).lerp(Color(0.45, 0.45, 0.47), k)
+						c = c.lightened(clampf(t.normal_at(x, z).x * 0.6, -0.2, 0.2))
+					img.set_pixel(i, j, c)
+			tex = ImageTexture.create_from_image(img)
+
+	func _process(_d: float) -> void:
+		queue_redraw()
+
+	func _to_map(p: Vector3, r: Rect2) -> Vector2:
+		return r.position + Vector2((p.x + R) / (2.0 * R), (p.z + R) / (2.0 * R)) * r.size
+
+	func _draw() -> void:
+		var side := minf(size.x, size.y)
+		var r := Rect2(Vector2((size.x - side) * 0.5, 0), Vector2(side, side))
+		draw_texture_rect(tex, r, false, Color(0.8, 0.8, 0.85))
+		draw_rect(r, Color(HU.CYAN, 0.4), false, 1.0)
+		var s := PlayerStats.s
+		for zn in world.ZONES:
+			var c: Vector2 = zn[2]
+			var mp := _to_map(Vector3(c.x, 0, c.y), r)
+			if (s.discovered as Array).has(zn[0]):
+				var col := HU.GOLD if world.TRAVEL.has(zn[0]) else (HU.RED if String(zn[0]).begins_with("altar") or String(zn[0]).begins_with("den") else HU.CYAN)
+				draw_circle(mp, 3.5, col)
+				draw_string(HU.F_SEMI, mp + Vector2(5, 4), String(zn[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(HU.FG, 0.85))
+			else:
+				draw_string(HU.F_BOLD, mp + Vector2(-3, 4), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(HU.MUTED, 0.5))
+		for m in world.treasure.marks():
+			var mp2 := _to_map(m[0], r)
+			draw_line(mp2 + Vector2(-4, -4), mp2 + Vector2(4, 4), Color(1.0, 0.3, 0.2), 2.0)
+			draw_line(mp2 + Vector2(-4, 4), mp2 + Vector2(4, -4), Color(1.0, 0.3, 0.2), 2.0)
+		var pp: Vector3 = world.player.global_position
+		var pm := _to_map(pp, r)
+		var yaw: float = world.rig.yaw
+		var f := Vector2(-sin(yaw), -cos(yaw))
+		var rt := Vector2(-f.y, f.x)
+		draw_colored_polygon(PackedVector2Array([pm + f * 8.0, pm - f * 4.0 + rt * 4.5, pm - f * 4.0 - rt * 4.5]), Color(1.0, 0.2, 0.3))
 
 ## Helligkeit (Gerätestand, bleibt auch bei neuem Spiel erhalten)
 static func brightness_row(after: Callable) -> HBoxContainer:

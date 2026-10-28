@@ -17,6 +17,10 @@ var menu: SystemWindow
 var audio: Sfx
 var story: Story
 var quests: Quests
+var treasure: Treasure
+var drink_quest := {}       # optionale System-Quest: {e, t}
+var dens := {}              # Wolfsbau-Index -> Alpha-Reißer
+var _streak_t := 2.0
 var _last_story := -1
 var title: Control
 var loading: Label
@@ -60,7 +64,22 @@ const ZONES := [
 	["lander", "Landerwrack „Hoffnung“", Vector2(150, -175), 14.0],
 	["ford", "Die Furt", Vector2(66, 36), 12.0],
 	["lake", "Spiegelsee", Vector2(150, 175), 45.0],
+	["mill", "Alte Mühle", Vector2(40, -100), 16.0],
+	["hut", "Branns Jägerhütte", Vector2(-95, 10), 13.0],
+	["barrow", "Hügelgräber der Alten", Vector2(-215, -50), 22.0],
+	["morrow", "Morrow-Station (Ruine)", Vector2(200, 40), 22.0],
+	["den0", "Wolfsbau am Spiegelhang", Vector2(10, 140), 12.0],
+	["den1", "Wolfsbau im Grauwald", Vector2(-75, -135), 12.0],
+	["den2", "Wolfsbau am Turmweg", Vector2(120, -70), 12.0],
+	["altar0", "Blutaltar des Westens", Vector2(-130, 175), 8.0],
+	["altar1", "Blutaltar des Südens", Vector2(30, 190), 8.0],
+	["altar2", "Blutaltar des Ostens", Vector2(178, -140), 8.0],
+	["obelisk_n", "Nördlicher Obelisk", Vector2(30, -190), 8.0],
+	["obelisk_s", "Südlicher Obelisk", Vector2(-40, 220), 8.0],
 ]
+
+## Orte, zu denen man schnellreisen kann (nach Entdeckung)
+const TRAVEL := ["ruin", "village", "bandits", "tower", "shrine", "lander", "mill", "hut", "barrow", "morrow"]
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -130,9 +149,11 @@ func _build_world() -> void:
 	places = Places.new()
 	add_child(places)
 	places.build(terrain)
+	treasure = Treasure.new()
+	treasure.plan(terrain, places.spots, places.exclusions())
 	veg = Vegetation.new()
 	add_child(veg)
-	veg.generate(terrain, places.exclusions())
+	veg.generate(terrain, places.exclusions() + treasure.exclusions())
 	daynight = DayNight.new()
 	add_child(daynight)
 	rig = CameraRig.new()
@@ -151,6 +172,8 @@ func _build_world() -> void:
 	quests.w = self
 	add_child(quests)
 	_build_fx_assets()
+	add_child(treasure)
+	treasure.build(self)
 	_spawn_world()
 	if PlayerStats.flag("village_fate", "") == "burned":
 		places.burn_village()
@@ -284,6 +307,17 @@ func _spawn_world() -> void:
 			var a := Animal.new()
 			a.setup(self, terrain.ground(Vector3(hc.x + randf_range(-6, 6), 0, hc.y + randf_range(-6, 6))) + Vector3(0, 0.3, 0))
 			add_child(a)
+	# Wolfsbaue: Alpha-Reißer (kehren jeden Tag zurück) mit Rudel
+	for i in (sp.dens as Array).size():
+		_spawn_den(i)
+	# Plünderer in der Morrow-Station
+	for i in 3:
+		var id := "morrow_%d" % i
+		if PlayerStats.is_dead(id):
+			continue
+		var e := Enemy.new()
+		e.setup("bandit_archer" if i == 2 else "bandit", self, terrain.ground(sp.morrow + Vector3(-3 + i * 3, 0, 2)) + Vector3(0, 0.3, 0), 3 + i, id)
+		add_child(e)
 	# Reißer-Rudel (nachts)
 	for pc in [Vector2(-60, 110), Vector2(-150, -40), Vector2(80, -110), Vector2(160, 120)]:
 		for k in 2:
@@ -291,6 +325,81 @@ func _spawn_world() -> void:
 			e.setup("reisser", self, terrain.ground(Vector3(pc.x + k * 2.0, 0, pc.y)) + Vector3(0, 0.3, 0), 2 + k)
 			e.night_only = true
 			add_child(e)
+
+func _spawn_den(i: int) -> void:
+	if dens.has(i) and is_instance_valid(dens[i]) and (dens[i] as Enemy).alive:
+		return
+	var killed := int(PlayerStats.s.elites.get("den%d" % i, -1))
+	if killed >= int(PlayerStats.s.day):
+		return
+	var c: Vector3 = places.spots.dens[i]
+	var a := spawn_elite("alpha", c + Vector3(0, 0, -0.5), false)
+	a.set_meta("den", i)
+	dens[i] = a
+	for k in 2:
+		var e := Enemy.new()
+		e.setup("reisser", self, terrain.ground(c + Vector3(-2.5 + k * 5.0, 0, 2.0)) + Vector3(0, 0.3, 0), maxi(2, int(PlayerStats.s.level) - 1 + k))
+		e.night_only = true
+		add_child(e)
+
+## Elite-Gegner erscheinen lassen (Grabwächter aus Gräbern, Alphas in Wolfsbauen)
+func spawn_elite(t: String, at: Vector3, angry := true) -> Enemy:
+	var e := Enemy.new()
+	e.setup(t, self, terrain.ground(at) + Vector3(0, 0.3, 0), int(PlayerStats.s.level) + 2)
+	add_child(e)
+	if angry:
+		e.aggro = true
+		burst(at + Vector3(0, 1.0, 0), Color(0.3, 1.0, 0.6) if t == "ghoul" else Color(1.0, 0.4, 0.2), 2.0)
+		rig.shake = 0.6
+	return e
+
+func treasure_maps_changed() -> void:
+	treasure._refresh_digs()
+
+## Schnellreise zu einem entdeckten Ort
+func travel_to(zone_id: String) -> void:
+	if not (PlayerStats.s.discovered as Array).has(zone_id):
+		return
+	for e in get_tree().get_nodes_in_group("hostile"):
+		if (e as Enemy) and (e as Enemy).aggro and (e as Node3D).global_position.distance_to(player.global_position) < 30.0:
+			PlayerStats.system_message.emit("Nicht während eines Kampfes.", "warn")
+			return
+	var target := Vector3.ZERO
+	for zn in ZONES:
+		if zn[0] == zone_id:
+			var c: Vector2 = zn[2]
+			target = Vector3(c.x, 0, c.y)
+	var sp: Dictionary = places.spots
+	match zone_id:
+		"ruin":
+			target = sp.ruin_wake
+		"village":
+			target = sp.village + Vector3(-4, 0, 14)
+		"bandits":
+			target = sp.bandits + Vector3(0, 0, 18)
+		"tower":
+			target = sp.tower + Vector3(0, 0, 12)
+		"mill":
+			target = sp.mill_front + Vector3(2, 0, -3)
+		"hut":
+			target = sp.hut_front + Vector3(0, 0, -3)
+		"barrow":
+			target = sp.barrow + Vector3(0, 0, 10)
+		"morrow":
+			target = sp.morrow + Vector3(0, 0, -14)
+		"shrine":
+			target = sp.shrine + Vector3(0, 0, 5)
+		"lander":
+			target = sp.lander + Vector3(-7, 0, 6)
+	if menu.visible:
+		toggle_menu()
+	hud.fade_t = 0.0
+	await get_tree().create_timer(0.5).timeout
+	player.global_position = terrain.ground(target) + Vector3(0, 0.4, 0)
+	player.velocity = Vector3.ZERO
+	rig.global_position = player.global_position + Vector3(0, 1.5, 0)
+	PlayerStats.s.minutes = float(PlayerStats.s.minutes) + 20.0
+	PlayerStats.system_message.emit("Schattenreise · 20 Minuten vergehen.", "mini")
 
 # ---------- Titel ----------
 
@@ -345,7 +454,7 @@ func _build_title() -> void:
 	var qr := SystemWindow.quality_row(_refresh_title)
 	qr.custom_minimum_size = Vector2(280, 0)
 	v.add_child(qr)
-	v.add_child(H.lbl("v0.6.0 · Akt 2", 9, Color(H.MUTED, 0.6), H.F_MONO))
+	v.add_child(H.lbl("v0.7.0 · Schätze & Erkundung", 9, Color(H.MUTED, 0.6), H.F_MONO))
 
 func _refresh_title() -> void:
 	if title:
@@ -572,6 +681,11 @@ func perform_feed(a: Actor, mode: String, scripted: bool) -> void:
 		blood_hit(a, player.global_position, false)
 	var gained := PlayerStats.feed(info, mode)
 	PlayerStats.system_message.emit("+%d Blut" % int(gained), "blood")
+	if not drink_quest.is_empty() and drink_quest.e == a:
+		drink_quest = {}
+		hud.drink_t = -1.0
+		var rew := PlayerStats.drink_quest_reward()
+		PlayerStats.system_message.emit("OPTIONALE QUEST ERFÜLLT  ·  %s" % rew, "reward")
 	player.model.play("")
 	player.busy = false
 	state = "play"
@@ -629,6 +743,24 @@ func on_villager_killed(n: HumanNpc) -> void:
 func on_enemy_downed(e: Enemy) -> void:
 	if e.npc_id == "krahe":
 		story.krahe_downed(e)
+		return
+	# Optionale System-Quest wie im Hörbuch: trinke vom besiegten Gegner
+	if not e.is_boss() and drink_quest.is_empty() and randf() < 0.55:
+		drink_quest = {"e": e, "t": 15.0}
+		PlayerStats.system_message.emit("[OPTIONALE QUEST] Trinke das Blut von %s (15 s). Belohnung: Attributpunkt" % e.display_name, "quest")
+
+func _update_drink_quest(rd: float) -> void:
+	if drink_quest.is_empty():
+		hud.drink_t = -1.0
+		return
+	var e: Enemy = drink_quest.e
+	drink_quest.t = float(drink_quest.t) - rd
+	hud.drink_t = float(drink_quest.t)
+	if not is_instance_valid(e) or not e.alive or not e.downed or float(drink_quest.t) <= 0.0:
+		if state != "talk":
+			drink_quest = {}
+			hud.drink_t = -1.0
+			PlayerStats.system_message.emit("Optionale Quest verfallen.", "mini")
 
 func on_enemy_alerted(e: Enemy) -> void:
 	if e.faction == "wacht" and not PlayerStats.flag("wacht_recognized"):
@@ -648,10 +780,35 @@ func on_enemy_killed(e: Enemy) -> void:
 		_slow_scale = 0.25
 		hud.show_banner("%s BESIEGT" % e.display_name.to_upper())
 		spawn_loot(Items.random_drop(lvl + 1, 0.15, 2), e.global_position)
-	elif randf() < (0.25 if e.kind == "human" else 0.1):
-		spawn_loot(Items.random_drop(lvl), e.global_position)
+	elif randf() < (0.25 if e.kind == "human" else 0.1) + PlayerStats.luck():
+		spawn_loot(Items.random_drop(lvl, PlayerStats.luck()), e.global_position)
 	if e.kind == "beast" and randf() < 0.5:
 		PlayerStats.pick_vial("beast")
+	# Bestienkristalle
+	if e.is_elite():
+		PlayerStats.bump("elites")
+		PlayerStats.add_crystal(1, 1 + randi() % 2)
+		if randf() < 0.4:
+			PlayerStats.add_crystal(2, 1)
+		if randf() < 0.3:
+			PlayerStats.add_picks(1)
+		if e.type == "alpha":
+			PlayerStats.bump("alphas")
+			if e.has_meta("den"):
+				PlayerStats.s.elites["den%d" % int(e.get_meta("den"))] = int(PlayerStats.s.day)
+				PlayerStats.system_message.emit("Der Bau ist still – bis morgen Nacht.", "mini")
+	elif e.is_boss():
+		PlayerStats.add_crystal(2, 1)
+		if randf() < 0.3:
+			PlayerStats.add_crystal(3, 1)
+	elif e.kind == "beast" and randf() < 0.3 + PlayerStats.luck():
+		PlayerStats.add_crystal(0, 1)
+	elif e.kind == "human" and randf() < 0.12:
+		PlayerStats.add_picks(1)
+		PlayerStats.system_message.emit("+1 Dietrich", "mini")
+	if not PlayerStats.has_skill("inspect"):
+		PlayerStats.grant_skill("inspect")
+		story.say([{"who": "SYSTEM", "text": "[Neue Fähigkeit erhalten: INSPEKTION]  Du siehst jetzt Stufe, Lebenskraft und Blutgruppe deiner Gegner. Mit Blutsinn bei allen Wesen."}])
 	quests.on_kill(e)
 
 func on_animal_killed(a: Node) -> void:
@@ -717,6 +874,10 @@ func _update_interact() -> void:
 	if not qi.is_empty():
 		_set_interact(qi[0], qi[1])
 		return
+	var ti: Array = treasure.interaction(pp, _sense_amt > 0.3)
+	if not ti.is_empty():
+		_set_interact(ti[0], ti[1], null, ti[2])
+		return
 	if int(PlayerStats.s.story) == 3 and not PlayerStats.flag("jory_resolved") and npcs.has("jory") and is_instance_valid(npcs.jory) and npcs.jory.alive:
 		if pp.distance_to(sp.cage + Vector3(1.4, 0, 0)) < 1.6:
 			_set_interact("cage", "KÄFIG ÖFFNEN", null, "Lenz sieht zu!" if _guard_watching() else "")
@@ -778,6 +939,8 @@ func _interact() -> void:
 		_:
 			if interact_id.begins_with("q_"):
 				quests.interact(interact_id)
+			elif interact_id.substr(0, 3) in ["tr:", "pg:", "al:", "dg:"] or interact_id.begins_with("trl:"):
+				treasure.interact(interact_id)
 			elif interact_id.begins_with("obelisk:"):
 				var i := int(interact_id.substr(8))
 				PlayerStats.set_flag("obelisk_%d" % i)
@@ -895,6 +1058,8 @@ func _process(delta: float) -> void:
 	_update_zone(delta)
 	_update_compass()
 	_update_loot(delta)
+	treasure.tick(delta, _sense_amt)
+	_update_drink_quest(rd)
 	_update_bolts(delta)
 	_update_fx(delta, rd)
 	_update_decals(delta)
@@ -1047,6 +1212,11 @@ func _update_compass() -> void:
 	if PlayerStats.flag("cult_lead") and not PlayerStats.flag("shrine_read") and st < 5:
 		marks.append([sp.shrine, Color(0.9, 0.2, 0.3), "SCHREIN"])
 	marks.append_array(quests.marks())
+	marks.append_array(treasure.marks())
+	if sense_on:
+		var hint: Array = treasure.nearest_hint(player.global_position)
+		if not hint.is_empty():
+			marks.append(hint)
 	hud.compass_marks = marks
 
 func _director() -> void:
@@ -1057,6 +1227,14 @@ func _director() -> void:
 		_last_story = int(PlayerStats.s.story)
 		quests.on_story(_last_story)
 	quests.tick()
+	_streak_t -= 1.0
+	if _streak_t <= 0.0:
+		_streak_t = 30.0
+		PlayerStats.check_titles()
+		var day := PlayerStats.check_streak()
+		if day > 0:
+			hud.show_banner("LOGIN-SERIE · TAG %d" % day)
+			sfx("level")
 	# Tamas läuft ins Dorf
 	if npcs.has("tamas") and is_instance_valid(npcs.tamas) and npcs.tamas.alive and PlayerStats.flag("tamas", "") in ["helped", "sipped"]:
 		if npcs.tamas.global_position.distance_to(places.spots.village) < 30.0 and not PlayerStats.flag("tamas_arrived"):
@@ -1082,6 +1260,8 @@ func _check_events() -> void:
 		PlayerStats.mark_dead("tamas")
 	if day > _last_day:
 		_last_day = day
+		for i in (places.spots.dens as Array).size():
+			_spawn_den(i)
 		if PlayerStats.flag("tamas", "") in ["drained", "left"]:
 			PlayerStats.set_flag("tamas_found")
 

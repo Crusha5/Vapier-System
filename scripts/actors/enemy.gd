@@ -11,6 +11,8 @@ const TYPES := {
 	"cultist": {"name": "Kind der Nacht", "hp": 80.0, "speed": 4.6, "dmg": 13.0, "range": 2.1, "windup": 0.5, "cd": 1.0, "xp": 45, "aggro": 16.0, "kind": "human", "faction": "cult", "shards": 6},
 	"ilva": {"name": "Seherin Ilva", "hp": 320.0, "speed": 5.0, "dmg": 18.0, "range": 2.3, "windup": 0.45, "cd": 0.9, "xp": 260, "aggro": 18.0, "kind": "human", "faction": "cult", "boss": true, "shards": 60},
 	"sorn": {"name": "Hauptmann Sorn", "hp": 420.0, "speed": 4.8, "dmg": 22.0, "range": 2.4, "windup": 0.5, "cd": 0.95, "xp": 320, "aggro": 24.0, "kind": "human", "faction": "wacht", "boss": true, "shards": 80},
+	"alpha": {"name": "Alpha-Reißer", "hp": 360.0, "speed": 6.6, "dmg": 20.0, "range": 2.6, "windup": 0.5, "cd": 1.05, "xp": 170, "aggro": 20.0, "kind": "beast", "faction": "wild", "boss": true, "elite": true, "shards": 25},
+	"ghoul": {"name": "Grabwächter", "hp": 300.0, "speed": 4.5, "dmg": 18.0, "range": 2.3, "windup": 0.55, "cd": 1.0, "xp": 150, "aggro": 22.0, "kind": "beast", "faction": "undead", "boss": true, "elite": true, "shards": 22},
 	"reisser": {"name": "Reißer", "hp": 85.0, "speed": 6.2, "dmg": 13.0, "range": 2.0, "windup": 0.42, "cd": 1.0, "xp": 35, "aggro": 20.0, "kind": "beast", "faction": "wild", "shards": 4},
 }
 
@@ -68,9 +70,20 @@ func _build_model() -> void:
 			model = Humanoid.new(Looks.varek())
 		"reisser":
 			model = QuadModel.new("reisser")
+		"alpha":
+			model = QuadModel.new("alpha")
+		"ghoul":
+			model = Humanoid.new(Looks.ghoul())
 
 func _height() -> float:
+	if type == "ghoul":
+		return 1.85
+	if type == "alpha":
+		return 1.55
 	return 1.2 if kind == "beast" else 1.75
+
+func is_elite() -> bool:
+	return cfg.get("elite", false)
 
 func _ready() -> void:
 	super._ready()
@@ -83,6 +96,9 @@ func _ready() -> void:
 			h.add_blade(Color(0.4, 0.3, 0.2), 0.5, 0.04)
 		elif type == "wacht":
 			h.add_blade(Color(0.5, 0.75, 1.0), 1.0, 0.05)
+		elif type == "ghoul":
+			h.add_blade(Color(0.35, 0.9, 0.6), 1.2, 0.06)
+			h.set_eye_glow(Color(0.3, 1.0, 0.6), 3.5)
 		else:
 			h.add_blade(Color(0.55, 0.55, 0.58), 0.85 if type != "krahe" else 1.1, 0.05)
 	telegraph = Toon.quad_holo(self, Vector2(1, 1), Vector3(0, 0.08, 0), Toon.holo(Color(1.0, 0.15, 0.1), 2.0, true, 0.0).duplicate())

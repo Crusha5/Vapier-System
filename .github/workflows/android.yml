@@ -34,7 +34,8 @@ jobs:
       - name: Signierschlüssel vorbereiten
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          # Auf Wunsch des Besitzers fest eingetragen (Repo ist öffentlich). Ein gesetztes Secret hat Vorrang.
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || '9c14b1d9968ea1b3ff543db7' }}
         run: |
           if [ -n "$KEYSTORE_PASSWORD" ] && [ -f release.keystore.enc ]; then
             # Fester Schlüssel liegt verschlüsselt im Repo, das Passwort ist das Secret KEYSTORE_PASSWORD

@@ -111,3 +111,8 @@ static func cultist(seed: int) -> Dictionary:
 static func ilva() -> Dictionary:
 	return {"female": true, "body": "female.outfit.tanner.skin.light.lod1", "armor": "armor.tanner.default", "hair": "female.hair.long.hair-2",
 		"hair_color": Color(0.85, 0.84, 0.82), "cloth": Color(0.55, 0.1, 0.12), "skin_tone": Color(0.92, 0.88, 0.9), "scale": 1.02}
+
+## Grabwächter: untoter Hüter der Gräber der Alten – aschgraue Haut, grün glühende Augen
+static func ghoul() -> Dictionary:
+	return {"body": "male.outfit.class.necromancer.lod1", "armor": "armor.class.necromancer.default", "cloth": Color(0.35, 0.38, 0.36),
+		"accent": Color(0.12, 0.3, 0.2), "skin_tone": Color(0.55, 0.6, 0.58), "hair": "hair.long.hair-1", "hair_color": Color(0.7, 0.72, 0.7), "scale": 1.12}

@@ -18,6 +18,13 @@ const BANDITS := Vector2(-96, 138)
 const TOWER := Vector2(212, -92)
 const LAKE := Vector2(150, 175)
 const SHRINE := Vector2(-205, 95)
+## Erkundungsorte (v0.7)
+const MILL := Vector2(40, -100)
+const HUT := Vector2(-95, 10)
+const BARROW := Vector2(-215, -50)
+const MORROW := Vector2(200, 40)
+const ALTARS := [Vector2(-130, 175), Vector2(30, 190), Vector2(178, -140)]
+const DENS := [Vector2(10, 140), Vector2(-75, -135), Vector2(120, -70)]
 
 const RIVER := [Vector2(-34, -262), Vector2(-28, -230), Vector2(8, -140), Vector2(30, -50), Vector2(52, 10), Vector2(66, 36),
 	Vector2(92, 82), Vector2(120, 128), Vector2(150, 175)]
@@ -28,7 +35,9 @@ const ROADS := [
 	[Vector2(-62, 96), Vector2(-140, 100), Vector2(-205, 95)],
 ]
 ## Eingeebnete Flächen: Mitte, Radius, Übergang
-const FLATS := [[VILLAGE, 34.0, 18.0], [BANDITS, 20.0, 12.0], [RUIN, 22.0, 14.0], [TOWER, 16.0, 10.0], [SHRINE, 10.0, 8.0]]
+const FLATS := [[VILLAGE, 34.0, 18.0], [BANDITS, 20.0, 12.0], [RUIN, 22.0, 14.0], [TOWER, 16.0, 10.0], [SHRINE, 10.0, 8.0],
+	[MILL, 9.0, 6.0], [HUT, 8.0, 6.0], [BARROW, 16.0, 10.0], [MORROW, 18.0, 10.0],
+	[Vector2(-130, 175), 3.5, 5.0], [Vector2(30, 190), 3.5, 5.0], [Vector2(178, -140), 3.5, 6.0]]
 
 var h := PackedFloat32Array()
 var road_mask := PackedFloat32Array()

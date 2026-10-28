@@ -52,6 +52,7 @@ var perfect_t := 0.0
 var fade_t := 9.0
 var chronicle: Array = []
 var chronicle_t := -1.0
+var drink_t := -1.0
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -409,6 +410,8 @@ func _draw() -> void:
 		_draw_compass()
 		_draw_quest()
 		if not in_dialog():
+			_draw_drink_quest()
+		if not in_dialog():
 			_draw_controls()
 			_draw_boss()
 	_draw_msgs()
@@ -532,7 +535,7 @@ func _draw_stats() -> void:
 		draw_rect(Rect2(cx, cy, tw, 17), Color(ch[1], 0.6), false, 1.0)
 		_str(Vector2(cx + 7, cy + 12.5), ch[0], 10, ch[1])
 		cx += tw + 6
-	var my := cy + 36
+	var my := cy + 36 + (36 if drink_t >= 0.0 else 0)
 	for m in minis:
 		var a := clampf(2.4 - float(m.t), 0.0, 1.0)
 		_str(Vector2(x0, my), m.text, 12, Color(H.FG, a * 0.9), H.F_SEMI)
@@ -686,11 +689,14 @@ func _icon(id: String, c: Vector2, r: float, col: Color) -> void:
 
 func _draw_enemy_bars() -> void:
 	var cam: Camera3D = world.rig.camera
+	var inspect := PlayerStats.has_skill("inspect")
+	if inspect:
+		_draw_inspect(cam)
 	for e in get_tree().get_nodes_in_group("hostile"):
 		var en := e as Actor
 		if not en.alive or (en is Enemy and (en as Enemy).is_boss()):
 			continue
-		if en.hp >= en.max_hp and en.last_hit_t > 3.0:
+		if en.hp >= en.max_hp and en.last_hit_t > 3.0 and not inspect:
 			continue
 		var wp := en.global_position + Vector3(0, en._height() + 0.35, 0)
 		if cam.is_position_behind(wp) or wp.distance_to(cam.global_position) > 40.0:
@@ -701,6 +707,41 @@ func _draw_enemy_bars() -> void:
 		_bar(r, en.hp / en.max_hp, Color(1.0, 0.3, 0.3), Color(0.3, 0.05, 0.05, 0.6))
 		if en is Enemy and (en as Enemy).state == "windup":
 			_str_o(sp + Vector2(-10, -6), "!", 18, H.RED, H.F_BOLD, HORIZONTAL_ALIGNMENT_CENTER, 20)
+
+## Inspektion: Stufe, Name und Blutgruppe über Gegnern (mit Blutsinn über allen Wesen)
+func _draw_inspect(cam: Camera3D) -> void:
+	var sense: bool = world.sense_on
+	var group := "living" if sense else "hostile"
+	var pp: Vector3 = world.player.global_position
+	for e in get_tree().get_nodes_in_group(group):
+		var en := e as Actor
+		if en == null or not en.alive or en._far:
+			continue
+		var d := en.global_position.distance_to(pp)
+		if d > (28.0 if sense else 22.0):
+			continue
+		var wp := en.global_position + Vector3(0, en._height() + 0.35, 0)
+		if cam.is_position_behind(wp):
+			continue
+		var sp := cam.unproject_position(wp)
+		var elite := en is Enemy and (en as Enemy).is_boss()
+		var col := Color(1.0, 0.75, 0.3) if elite else (Color(1.0, 0.55, 0.5) if en.is_in_group("hostile") else Color(0.75, 0.9, 1.0))
+		var bt := "Tier" if en.kind == "animal" else ("Bestie" if en.kind == "beast" else "Mensch")
+		var txt := "Stufe %d  %s" % [en.level, en.display_name]
+		_str_o(sp + Vector2(-80, -9), txt, 10, Color(col, 0.95), H.F_BOLD, HORIZONTAL_ALIGNMENT_CENTER, 160)
+		if sense or d < 10.0:
+			_str_o(sp + Vector2(-80, -21), "%d/%d HP · %s" % [int(en.hp), int(en.max_hp), bt], 9, Color(H.FG, 0.75), H.F_SEMI, HORIZONTAL_ALIGNMENT_CENTER, 160)
+
+func _draw_drink_quest() -> void:
+	if drink_t < 0.0:
+		return
+	var w := 262.0
+	var r := Rect2(12, 136, w, 30)
+	var pulse := 0.6 + 0.4 * sin(_t * 6.0)
+	_panel(r, Color(H.GOLD, 0.8), Color(0.05, 0.03, 0.0, 0.8))
+	_str(r.position + Vector2(10, 13), "[ OPTIONALE QUEST ]", 9, Color(H.GOLD, pulse), H.F_SEMI)
+	_str(r.position + Vector2(10, 13), "%d s" % int(ceil(drink_t)), 11, H.GOLD, H.F_BOLD, HORIZONTAL_ALIGNMENT_RIGHT, w - 20)
+	_str(r.position + Vector2(10, 26), "Trinke das Blut deines Gegners", 11, H.FG, H.F_SEMI)
 
 func _draw_boss() -> void:
 	var boss: Actor = world.active_boss()
